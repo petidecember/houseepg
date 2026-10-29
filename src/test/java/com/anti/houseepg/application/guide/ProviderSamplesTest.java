@@ -11,7 +11,10 @@ import com.anti.houseepg.domain.guide.model.Programme;
 import com.anti.houseepg.domain.guide.model.SourceEpg;
 import com.anti.houseepg.domain.guide.model.SourceHealth;
 import com.anti.houseepg.domain.guide.model.SourceId;
+import com.anti.houseepg.domain.guide.policy.ChannelMatch;
+import com.anti.houseepg.domain.guide.policy.MatchState;
 import com.anti.houseepg.infrastructure.epg.XmltvReader;
+import com.anti.houseepg.infrastructure.match.InMemoryChannelMatchStore;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -38,6 +41,8 @@ class ProviderSamplesTest {
     private static final SourceId PROVIDER_A = new SourceId("provider-a");
     private static final SourceId PROVIDER_B = new SourceId("provider-b");
 
+    private final InMemoryChannelMatchStore matchStore = new InMemoryChannelMatchStore();
+
     private static final Map<String, String> FIXTURES = Map.of(
             "provider-a", "/fixtures/provider-a.xml",
             "provider-b", "/fixtures/provider-b.xml");
@@ -49,7 +54,7 @@ class ProviderSamplesTest {
 
         assertThat(result.health()).extracting(SourceHealth::state).containsOnly(SourceHealth.State.OK);
         assertThat(guide.channels()).hasSize(245);
-        assertThat(guide.programmes()).hasSize(1814);
+        assertThat(guide.programmes()).hasSize(1818);
 
         // The same real channel from two providers lands on one id, and it is the primary source's id.
         assertThat(channelIds(guide)).filteredOn(id -> id.startsWith("channel003")).containsExactly("channel003.xx");
@@ -68,16 +73,28 @@ class ProviderSamplesTest {
         // The winner keeps the winning source, so a slot can be explained later.
         assertThat(guide.programmes()).extracting(Programme::winningSource)
                 .containsOnly(PROVIDER_A, PROVIDER_B);
+
+        // Every declared source channel is recorded once, and the unmatched ones are exactly the
+        // channels that were kept as pass-throughs.
+        assertThat(result.matches()).hasSize(330);
+        assertThat(result.matches()).extracting(ChannelMatch::source).doesNotHaveDuplicates();
+        Set<String> passThroughIds = guide.channels().stream()
+                .filter(channel -> channel.origin() == Channel.Origin.PASS_THROUGH)
+                .map(channel -> channel.id().value())
+                .collect(Collectors.toSet());
+        assertThat(result.matches()).filteredOn(match -> match.state() == MatchState.UNMATCHED)
+                .extracting(match -> match.canonicalId().value())
+                .containsExactlyInAnyOrderElementsOf(passThroughIds);
     }
 
     /** The real use case, with the transport swapped for the fixture files. */
-    private static RefreshGuide refreshGuide() {
+    private RefreshGuide refreshGuide() {
         GuideSettings settings = new GuideSettings(
                 List.of(
                         EpgSource.of("provider-a", "Provider A", "fixture:provider-a", Credentials.none()),
                         EpgSource.of("provider-b", "Provider B", "fixture:provider-b", Credentials.none())),
                 Optional.empty());
-        return new RefreshGuide(settings, ProviderSamplesTest::readFixture, noChannelAuthority());
+        return new RefreshGuide(settings, ProviderSamplesTest::readFixture, noChannelAuthority(), matchStore);
     }
 
     private static ChannelAuthorityGateway noChannelAuthority() {

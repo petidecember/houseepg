@@ -118,7 +118,8 @@ Dependencies point inward:
 | `Source` | id, name, url, credentials (URL-embedded or header), format (`XMLTV`), enabled, refresh interval, priority position, health (last success, last failure, last error), `lastGoodSnapshotId` |
 | `RawSnapshot` | id, sourceId, fetchedAt, contentType, bytes (payload, possibly compressed), etag/last-modified |
 | `CanonicalChannel` | id (**emitted XMLTV channel id**), displayName, icon, number, source-of-truth (`M3U` \| `PRIMARY_XMLTV`), frozen flag |
-| `SourceChannel` | sourceId, sourceChannelId, displayName, normalizedName, matchedCanonicalId, matchConfidence, matchState (`AUTO` \| `CONFIRMED` \| `CORRECTED` \| `UNMATCHED`) |
+| `SourceChannel` | sourceId, sourceChannelId, displayName, icon |
+| `ChannelMatch` | sourceChannelRef (`sourceId`, `sourceChannelId`), canonicalChannelId, matchConfidence (`EXACT_ID` \| `EXACT_NAME` \| `NORMALIZED_ID` \| `NORMALIZED_NAME` \| `NONE`), matchState (`AUTO` \| `CONFIRMED` \| `CORRECTED` \| `UNMATCHED`) |
 | `Programme` | sourceId, canonicalChannelId, start, stop, title, desc, category, episodeNum, icon, raw fields |
 | `MergedProgramme` | canonicalChannelId, start, stop, **winning sourceId**, payload (verbatim from the winning source) |
 | `RefreshRun` | sourceId, startedAt, outcome, programme count, error |
@@ -143,13 +144,21 @@ Used only for matching, never for output. Applied to `display-name` and to the s
 ### 6.2 Channel matching
 
 - The **registry** is the authority: it is seeded from the supplied M3U playlist, or — when there is
-  no playlist — from the primary (top-priority) XMLTV source.
-- Each source channel is matched to the registry channel whose normalized name matches. The M3U
-  decides whether HD and SD are genuinely separate channels (distinct `tvg-id`s); HouseEPG does not
-  invent that distinction.
-- Every auto-match is recorded with a confidence and is **shown in the UI to confirm or correct**.
+  no playlist — from the primary (top-priority) XMLTV source. It is seeded **once** and then kept
+  across refreshes; a refresh never re-seeds it, and an authority that cannot be read keeps the
+  previous registry rather than substituting another source's ids (§6.4, ADR-0002).
+- Each source channel is matched to a registry channel by the strongest available evidence, in this
+  order: the exact source channel id, the exact display name, the normalized id, the normalized
+  display name. The M3U decides whether HD and SD are genuinely separate channels (distinct
+  `tvg-id`s); because normalization strips exactly those quality tags, a key that covers several
+  registry channels is resolved by preferring the candidate advertising the same quality, then by
+  registry order, so the choice is deterministic.
+- Every match is recorded as a `ChannelMatch` with its confidence and state, and is **shown in the UI
+  to confirm or correct**. A `CONFIRMED` or `CORRECTED` decision is reused on later refreshes and an
+  automatic pass never overwrites it; a decision whose canonical channel no longer exists is stale and
+  matching falls back to name lookup.
 - A source channel that matches nothing is kept as a **pass-through channel**: it is emitted with its
-  own id, so nothing is silently dropped.
+  own id, so nothing is silently dropped, and it is recorded as `UNMATCHED`.
 
 ### 6.3 Merge — per-channel timeline claim
 
@@ -174,7 +183,8 @@ timeline**; holes are expected and are the DVR client's problem to render as "no
 - The emitted XMLTV channel id is the **M3U `tvg-id`** when the playlist is the channel authority,
   otherwise the **primary XMLTV source's channel id**. HouseEPG **never invents ids**.
 - Ids are **frozen against implicit drift**: a routine source refresh never changes an id, so the
-  DVR's cached id→channel mapping survives.
+  DVR's cached id→channel mapping survives. Concretely, the registry is seeded once and kept; a failed
+  or empty playlist read reuses it instead of falling back to another source's ids (ADR-0002).
 - Ids **can** change on a **deliberate re-seed** — changing which source sits at priority #1 —
   because "primary" is positional. The UI must warn that DVR mappings may need redoing. See ADR-0002.
 

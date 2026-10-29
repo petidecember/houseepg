@@ -4,6 +4,7 @@ import com.anti.houseepg.application.guide.GuideSettings;
 import com.anti.houseepg.application.guide.RefreshGuide;
 import com.anti.houseepg.application.guide.ServeGuide;
 import com.anti.houseepg.application.guide.port.ChannelAuthorityGateway;
+import com.anti.houseepg.application.guide.port.ChannelMatchStore;
 import com.anti.houseepg.application.guide.port.Credentials;
 import com.anti.houseepg.application.guide.port.EpgSource;
 import com.anti.houseepg.application.guide.port.EpgSourceGateway;
@@ -29,8 +30,8 @@ public class HouseEpgConfiguration {
 
     @Bean
     RefreshGuide refreshGuide(GuideSettings settings, EpgSourceGateway epgSources,
-            ChannelAuthorityGateway channelAuthority) {
-        return new RefreshGuide(settings, epgSources, channelAuthority);
+            ChannelAuthorityGateway channelAuthority, ChannelMatchStore matchStore) {
+        return new RefreshGuide(settings, epgSources, channelAuthority, matchStore);
     }
 
     @Bean

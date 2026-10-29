@@ -15,8 +15,6 @@ public record ChannelKey(String value) {
 
     private static final Pattern COUNTRY_PREFIX = Pattern.compile("^\\s*[A-Za-z]{2}\\s*[-:|]\\s*");
     private static final Pattern COUNTRY_SUFFIX = Pattern.compile("\\.[A-Za-z]{2,3}$");
-    private static final Pattern QUALITY_TAG =
-            Pattern.compile("(?i)(?<![A-Za-z0-9])(uhd|fhd|hd|sd|h265|hevc|4k|8k)(?![A-Za-z0-9])");
     private static final Pattern NON_ALNUM = Pattern.compile("[^a-z0-9]+");
     private static final Pattern HAS_LETTER = Pattern.compile("[A-Za-z]");
 
@@ -37,7 +35,7 @@ public record ChannelKey(String value) {
             text = suffix.replaceFirst("");
         }
 
-        text = QUALITY_TAG.matcher(text).replaceAll(" ");
+        text = QualityTag.strip(text);
         return new ChannelKey(NON_ALNUM.matcher(text.toLowerCase(Locale.ROOT)).replaceAll(""));
     }
 

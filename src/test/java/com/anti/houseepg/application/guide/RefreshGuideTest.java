@@ -8,10 +8,17 @@ import com.anti.houseepg.infrastructure.epg.XmltvReader;
 import com.anti.houseepg.application.guide.port.Credentials;
 import com.anti.houseepg.application.guide.port.EpgSource;
 import com.anti.houseepg.domain.guide.model.Channel;
+import com.anti.houseepg.domain.guide.model.ChannelId;
 import com.anti.houseepg.domain.guide.model.Guide;
 import com.anti.houseepg.domain.guide.model.Programme;
 import com.anti.houseepg.domain.guide.model.SourceHealth;
+import com.anti.houseepg.domain.guide.model.SourceId;
+import com.anti.houseepg.domain.guide.policy.ChannelMatch;
+import com.anti.houseepg.domain.guide.policy.MatchConfidence;
+import com.anti.houseepg.domain.guide.policy.MatchState;
+import com.anti.houseepg.domain.guide.policy.SourceChannelRef;
 import com.anti.houseepg.infrastructure.net.HttpFetcher;
+import com.anti.houseepg.infrastructure.match.InMemoryChannelMatchStore;
 import com.anti.houseepg.infrastructure.playlist.M3uChannelAuthority;
 import com.anti.houseepg.interfaces.web.XmltvFeedWriter;
 import com.sun.net.httpserver.HttpExchange;
@@ -86,13 +93,21 @@ class RefreshGuideTest {
 
     private HttpServer server;
     private final AtomicBoolean sourceBFails = new AtomicBoolean(false);
+    private final AtomicBoolean playlistFails = new AtomicBoolean(false);
+    private final InMemoryChannelMatchStore matchStore = new InMemoryChannelMatchStore();
     private String base;
     private ServeGuide serveGuide;
 
     @BeforeEach
     void startServer() throws IOException {
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
-        server.createContext("/playlist.m3u", exchange -> respond(exchange, 200, PLAYLIST));
+        server.createContext("/playlist.m3u", exchange -> {
+            if (playlistFails.get()) {
+                respond(exchange, 503, "unavailable");
+                return;
+            }
+            respond(exchange, 200, PLAYLIST);
+        });
         server.createContext("/a.xml", exchange -> respond(exchange, 200, SOURCE_A));
         server.createContext("/b.xml.gz", exchange -> {
             if (sourceBFails.get()) {
@@ -182,15 +197,49 @@ class RefreshGuideTest {
     }
 
     @Test
-    void anUnavailablePlaylistFallsBackToThePrimarySourceAsTheRegistry() {
+    void aPlaylistThatCannotBeReadDoesNotBorrowThePrimarySourcesIds() {
+        // A configured playlist is the authority even when it is down: substituting the primary
+        // source's ids would change what the DVR sees the moment the playlist comes back (ADR-0002).
         ServeGuide withoutPlaylist = serveGuide(Optional.of(base + "/missing.m3u"), true);
 
         Guide guide = withoutPlaylist.refresh().guide();
 
-        assertThat(guide.channels()).extracting(channel -> channel.id().value()).contains("CH1", "CH2HD");
-        assertThat(guide.channels()).filteredOn(channel -> channel.id().value().equals("CH1"))
+        assertThat(guide.channels()).extracting(channel -> channel.id().value())
+                .containsExactlyInAnyOrder("CH1", "CH2HD", "CH1 (HD)", "ch3");
+        assertThat(guide.channels()).extracting(Channel::origin).containsOnly(Channel.Origin.PASS_THROUGH);
+    }
+
+    @Test
+    void aPlaylistOutageKeepsTheSeededIds() {
+        assertThat(serveGuide.refresh().guide().channels())
+                .extracting(channel -> channel.id().value())
+                .containsExactlyInAnyOrder("ch1.xx", "ch2.xx", "ch3");
+
+        playlistFails.set(true);
+
+        // Ids stay exactly as seeded: the registry is frozen across refreshes.
+        assertThat(serveGuide.refresh().guide().channels())
+                .extracting(channel -> channel.id().value())
+                .containsExactlyInAnyOrder("ch1.xx", "ch2.xx", "ch3");
+    }
+
+    @Test
+    void everySourceChannelMatchIsRecordedAndACuratedDecisionIsReused() {
+        RefreshResult first = serveGuide.refresh();
+        assertThat(first.matches()).hasSize(4);
+        assertThat(matchStore.decisions()).hasSize(4);
+
+        SourceChannelRef ref = new SourceChannelRef(new SourceId("b"), "CH1 (HD)");
+        matchStore.decide(ChannelMatch.corrected(ref, new ChannelId("ch2.xx"), MatchConfidence.EXACT_ID));
+
+        RefreshResult second = serveGuide.refresh();
+
+        assertThat(second.matches()).filteredOn(match -> match.source().equals(ref))
                 .singleElement()
-                .satisfies(channel -> assertThat(channel.origin()).isEqualTo(Channel.Origin.PRIMARY_SOURCE));
+                .satisfies(match -> {
+                    assertThat(match.canonicalId().value()).isEqualTo("ch2.xx");
+                    assertThat(match.state()).isEqualTo(MatchState.CORRECTED);
+                });
     }
 
     @Test
@@ -224,12 +273,12 @@ class RefreshGuideTest {
         return List.of(first, EpgSource.of("b", "Source B", base + "/b.xml.gz", Credentials.none()));
     }
 
-    private static RefreshGuide refreshGuide(GuideSettings settings) {
+    private RefreshGuide refreshGuide(GuideSettings settings) {
         HouseEpgProperties properties =
                 new HouseEpgProperties(null, List.of(), Duration.ofHours(1), Duration.ofSeconds(10));
         HttpFetcher fetcher = new HttpFetcher(properties);
         return new RefreshGuide(settings, new HttpEpgSourceGateway(fetcher, new XmltvReader()),
-                new M3uChannelAuthority(fetcher));
+                new M3uChannelAuthority(fetcher), matchStore);
     }
 
     private static void respond(HttpExchange exchange, int status, String body) throws IOException {
