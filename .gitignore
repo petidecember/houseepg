@@ -9,6 +9,11 @@ test_artifacts/
 .repowise/
 .github/
 .unipi/
+.claude/
+
+### Node ###
+node_modules/
+/frontend/dist/
 
 ### STS ###
 .apt_generated

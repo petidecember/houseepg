@@ -7,7 +7,9 @@ import com.anti.houseepg.application.config.ReseedRegistry;
 import com.anti.houseepg.application.config.port.ConfigDumpWriter;
 import com.anti.houseepg.application.config.port.DeclarationReader;
 import com.anti.houseepg.application.config.port.SourceOrderStore;
+import com.anti.houseepg.application.guide.DecideMatch;
 import com.anti.houseepg.application.guide.GuideSettings;
+import com.anti.houseepg.application.guide.InspectGuide;
 import com.anti.houseepg.application.guide.RefreshGuide;
 import com.anti.houseepg.application.guide.ServeGuide;
 import com.anti.houseepg.application.guide.port.ChannelAuthorityGateway;
@@ -48,6 +50,16 @@ public class HouseEpgConfiguration {
     @Bean
     ServeGuide serveGuide(RefreshGuide refreshGuide, GuideStore guideStore, ChannelMatchStore matchStore) {
         return new ServeGuide(refreshGuide, guideStore, matchStore);
+    }
+
+    @Bean
+    InspectGuide inspectGuide(GuideStore guideStore, ChannelMatchStore matchStore) {
+        return new InspectGuide(guideStore, matchStore);
+    }
+
+    @Bean
+    DecideMatch decideMatch(GuideStore guideStore, ChannelMatchStore matchStore, RefreshGuide refreshGuide) {
+        return new DecideMatch(guideStore, matchStore, () -> refreshGuide.refreshDue(Instant.now()));
     }
 
     /** The YAML file the order is written back into; empty means the order is in-memory only (ADR-0005). */
