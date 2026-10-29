@@ -27,9 +27,11 @@ import org.junit.jupiter.api.Test;
  * through the real refresh use case (including the registry seeded from the top-priority source).
  *
  * <p>The fixtures are white-labelled: channel ids, names, programme text and icons were replaced with
- * neutral values while keeping the structure of the originals, including the pairs whose comparison
- * keys collide within one provider. The numbers below are the golden values for those fixtures: if a
- * merge change moves them, that change has to be a deliberate one.
+ * neutral values, and programme volume is capped at the first six programmes of each channel so the
+ * pair stays under a megabyte. Every channel is kept, including the pairs whose comparison keys
+ * collide within one provider and the channels whose id and display name fold to different keys. The
+ * numbers below are the golden values for those fixtures: if a merge change moves them, that change
+ * has to be a deliberate one.
  */
 class ProviderSamplesTest {
 
@@ -47,7 +49,7 @@ class ProviderSamplesTest {
 
         assertThat(result.health()).extracting(SourceHealth::state).containsOnly(SourceHealth.State.OK);
         assertThat(guide.channels()).hasSize(245);
-        assertThat(guide.programmes()).hasSize(41841);
+        assertThat(guide.programmes()).hasSize(1814);
 
         // The same real channel from two providers lands on one id, and it is the primary source's id.
         assertThat(channelIds(guide)).filteredOn(id -> id.startsWith("channel003")).containsExactly("channel003.xx");

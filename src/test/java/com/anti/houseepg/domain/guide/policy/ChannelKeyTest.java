@@ -44,6 +44,16 @@ class ChannelKeyTest {
     }
 
     @Test
+    void doesNotFoldAccentedCharacters() {
+        // Accent folding is not implemented: non-ASCII letters are dropped, so an ASCII id and an
+        // accented display name do not agree. The provider samples contain exactly that divergence,
+        // which is why matching also tries the display name. Adding accent folding means revisiting
+        // this test and that fixture case together.
+        assertThat(ChannelKey.of("DunaTelevizio.xx").value()).isEqualTo("dunatelevizio");
+        assertThat(ChannelKey.of("XX - Dúna Televízió").value()).isEqualTo("dnatelevzi");
+    }
+
+    @Test
     void emptyAndBlankInputsProduceAnEmptyKey() {
         assertThat(ChannelKey.of(null).isEmpty()).isTrue();
         assertThat(ChannelKey.of("  ").isEmpty()).isTrue();
