@@ -190,7 +190,12 @@ timeline**; holes are expected and are the DVR client's problem to render as "no
 
 ## 7. Persistence
 
-Three layers in MongoDB:
+Three layers in MongoDB. The database is an **intermediate representation of the merge**: everything
+in it is derived from the sources and can be rebuilt, which is why it may be dropped at any time
+without losing user intent (ADR-0005). The one piece of user state — the **source priority order** —
+lives in the YAML configuration file, not here.
+
+Three layers:
 
 1. **Raw snapshot per source** — the last good payload. A re-merge never needs a re-fetch.
 2. **Normalized programmes per source** — indexed by `(canonicalChannelId, start)` and by
@@ -225,9 +230,12 @@ application at a dedicated database.
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /xmltv` | The merged XMLTV feed the DVR consumes. |
-| `GET /api/sources`, `POST /api/sources`, `PUT /api/sources/{id}`, `DELETE /api/sources/{id}` | Source CRUD (used by the UI, not a public API product). |
-| `PUT /api/priority` | Reorder sources (triggers re-seed + re-merge). |
+| `GET /api/priority`, `PUT /api/priority` | Read or change the source order. A write applies to the running merge immediately, rewrites the source list order in the YAML file atomically, and returns a persist status. It never re-seeds the registry. |
+| `POST /api/config/reload` | Re-read the YAML configuration. Rebinds sources and order and re-merges, but leaves the registry frozen, so emitted ids never move. |
+| `POST /api/config/dump` | Write the in-memory configuration, credentials included, to the log stream. Never returns it over HTTP. |
+| `POST /api/registry/reseed` | Explicit re-seed: preview the emitted id changes, then apply them. The only way an id may change (ADR-0002). |
 | `GET /api/channels`, `PUT /api/matches/{id}` | Registry view; confirm/correct a match. |
+| `GET /api/sources` | The configured sources with their health. **Read-only**: sources are declared in YAML, never through the API (ADR-0005). |
 | `GET /api/sources/status` | Per-source health, last refresh, last error. |
 | `POST /api/sources/{id}/refresh` | Manual refresh. |
 | `GET /api/preview/{canonicalChannelId}` | Merged timeline with the winning source per slot. |
@@ -236,10 +244,14 @@ These endpoints exist to serve the UI. They are not a supported JSON API.
 
 ## 10. Web UI (React)
 
-Source CRUD (URL, credentials, refresh interval, enable/disable) · drag-to-reorder priority ·
-channel auto-match review (confirm/correct) · registry view · per-source health and last refresh ·
-manual refresh now · merged-guide preview per channel **showing the winning source per slot** ·
-guide viewer.
+Drag-to-reorder priority · channel auto-match review (confirm/correct) · registry view ·
+per-source health and last refresh · manual refresh now · "reload config" · "dump config to log" ·
+merged-guide preview per channel **showing the winning source per slot** · guide viewer.
+
+There is **no source CRUD**: sources are declared in YAML and the UI may only change their order
+(ADR-0005). Reordering warns that it changes which source is primary and may therefore change emitted
+channel ids on a later re-seed, which can break DVR mappings (ADR-0002). The UI reports whether a
+source has credentials, never the credentials themselves.
 
 ## 11. Testing and verification
 
