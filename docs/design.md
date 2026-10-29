@@ -186,7 +186,7 @@ kept (the last good one).
 | `GET /api/sources`, `POST /api/sources`, `PUT /api/sources/{id}`, `DELETE /api/sources/{id}` | Source CRUD (used by the UI, not a public API product). |
 | `PUT /api/priority` | Reorder sources (triggers re-seed + re-merge). |
 | `GET /api/channels`, `PUT /api/matches/{id}` | Registry view; confirm/correct a match. |
-| `GET /api/sources/health` | Per-source health, last refresh, last error. |
+| `GET /api/sources/status` | Per-source health, last refresh, last error. |
 | `POST /api/sources/{id}/refresh` | Manual refresh. |
 | `GET /api/preview/{canonicalChannelId}` | Merged timeline with the winning source per slot. |
 
