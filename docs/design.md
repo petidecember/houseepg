@@ -86,22 +86,30 @@ Components, in dependency order:
 | `AdminController` | UI-facing endpoints: sources, priority, matches, registry, health, refresh, preview. |
 | React UI | Configuration and inspection surface (§10). |
 
-### 4.1 Code organisation (bounded contexts)
+### 4.1 Code organisation (DDD layers)
 
-The code is organised by bounded context, not by technical layer:
+The code is organised in the four DDD layers, with the bounded context nested inside each layer:
 
-| Package | Role |
+| Layer | Contents |
 | --- | --- |
-| `guide/model` | Core domain: `ChannelId`, `SourceId`, `Slot`, `Channel`, `Programme`, the `Guide` aggregate, `SourceEpg`/`SourceChannel`/`SourceProgramme` (the core's own view of an upstream source) and `SourceHealth`. |
-| `guide/policy` | Domain policies: `ChannelKey` (name normalisation), `ChannelMatching`, `PriorityMerge`. |
-| `guide/app` | Use cases `RefreshGuide` and `ServeGuide`, plus `GuideSettings`, `RefreshResult` and the ports `EpgSourceGateway` and `ChannelAuthorityGateway`. |
-| `epg` | Supporting adapter: reads a source over HTTP as XMLTV into the core model. |
-| `playlist` | Supporting adapter: reads the M3U channel authority. |
-| `web` | Presentation adapter: `GET /xmltv`, `GET /api/sources/status`, and the XMLTV renderer. |
-| `config`, `net` | Infrastructure: Spring wiring, binding properties, and the shared HTTP fetcher. |
+| `domain/guide/model` | Entities and value objects: `ChannelId`, `SourceId`, `Slot`, `Channel`, `Programme`, the `Guide` aggregate, `SourceEpg`/`SourceChannel`/`SourceProgramme`, `SourceHealth`. |
+| `domain/guide/policy` | Domain policies: `ChannelKey` (name normalisation), `ChannelMatching`, `PriorityMerge`, `SourceChannelRef`. |
+| `application/guide` | Use cases `RefreshGuide` and `ServeGuide`, plus `GuideSettings` and `RefreshResult`. |
+| `application/guide/port` | Ports and their collaborators: `EpgSourceGateway`, `ChannelAuthorityGateway`, `EpgSource`, `Credentials`, `SourceUnavailableException`. |
+| `infrastructure/config` | Spring wiring and the bound properties (`HouseEpgProperties`, `HouseEpgConfiguration`). |
+| `infrastructure/net` | Shared HTTP fetching. |
+| `infrastructure/epg` | XMLTV reading into the domain model. |
+| `infrastructure/playlist` | M3U channel-authority reading. |
+| `infrastructure/xmltv` | The XMLTV timestamp format, shared by reading and writing. |
+| `interfaces/web` | REST controller, XMLTV renderer and response view. Named `interfaces` because `interface` is a reserved word. |
 
-`guide` carries no Spring annotations. `config` translates binding properties into `GuideSettings` and
-wires the use cases, so the application layer depends on nothing framework-specific.
+Dependencies point inward:
+
+- `domain` imports nothing but `java.*` and itself.
+- `application` imports `domain` and `java.*` only; the single third-party dependency is the SLF4J logging
+  facade, and no Spring type appears in it.
+- `infrastructure` and `interfaces` implement and call the application's ports; `config` is the only
+  place that knows about Spring beans.
 
 ## 5. Domain model
 
@@ -124,7 +132,7 @@ each slot.
 
 Used only for matching, never for output. Applied to `display-name` and to the source channel id:
 
-1. Strip a **country prefix** of the form `<CC> - ` (`HU - AMC` → `AMC`).
+1. Strip a **country prefix**: a two-letter country code, a dash, then the name (`HU - AMC` → `AMC`).
 2. Strip a **country suffix** (`AMC.hu` → `AMC`).
 3. Strip **quality tags**: `(HD)`, `HD`, `(FHD)`, `FHD`, `(SD)`, `SD`, `4K`, `UHD`.
 4. Lowercase, strip punctuation, collapse whitespace.
