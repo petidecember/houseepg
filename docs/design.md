@@ -86,6 +86,23 @@ Components, in dependency order:
 | `AdminController` | UI-facing endpoints: sources, priority, matches, registry, health, refresh, preview. |
 | React UI | Configuration and inspection surface (§10). |
 
+### 4.1 Code organisation (bounded contexts)
+
+The code is organised by bounded context, not by technical layer:
+
+| Package | Role |
+| --- | --- |
+| `guide/model` | Core domain: `ChannelId`, `SourceId`, `Slot`, `Channel`, `Programme`, the `Guide` aggregate, `SourceEpg`/`SourceChannel`/`SourceProgramme` (the core's own view of an upstream source) and `SourceHealth`. |
+| `guide/policy` | Domain policies: `ChannelKey` (name normalisation), `ChannelMatching`, `PriorityMerge`. |
+| `guide/app` | Use cases `RefreshGuide` and `ServeGuide`, plus `GuideSettings`, `RefreshResult` and the ports `EpgSourceGateway` and `ChannelAuthorityGateway`. |
+| `epg` | Supporting adapter: reads a source over HTTP as XMLTV into the core model. |
+| `playlist` | Supporting adapter: reads the M3U channel authority. |
+| `web` | Presentation adapter: `GET /xmltv`, `GET /api/sources/status`, and the XMLTV renderer. |
+| `config`, `net` | Infrastructure: Spring wiring, binding properties, and the shared HTTP fetcher. |
+
+`guide` carries no Spring annotations. `config` translates binding properties into `GuideSettings` and
+wires the use cases, so the application layer depends on nothing framework-specific.
+
 ## 5. Domain model
 
 | Entity | Key fields |

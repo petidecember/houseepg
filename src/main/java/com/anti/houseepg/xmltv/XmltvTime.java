@@ -7,7 +7,10 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.Locale;
 
-/** XMLTV timestamps: {@code yyyyMMddHHmmss +ZZZZ}, where the offset is sometimes absent. */
+/**
+ * The XMLTV timestamp format, shared by the reading and the writing adapter so the format lives in one
+ * place: {@code yyyyMMddHHmmss +ZZZZ}, with the offset sometimes absent.
+ */
 public final class XmltvTime {
 
     private static final DateTimeFormatter WITH_OFFSET =
@@ -18,6 +21,7 @@ public final class XmltvTime {
     private XmltvTime() {
     }
 
+    /** Returns null when the value is absent or unparseable, so the caller can skip the entry. */
     public static OffsetDateTime parse(String raw) {
         if (raw == null || raw.isBlank()) {
             return null;
