@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tv source-info-name="Source B">
+  <channel id="BBC1HD"><display-name>BBC One (HD)</display-name></channel>
+  <channel id="Dave"><display-name>Dave</display-name></channel>
+  <programme start="20261029194500 +0000" stop="20261029210000 +0000" channel="BBC1HD">
+    <title>Heat</title>
+  </programme>
+  <programme start="20261029200000 +0000" stop="20261029203500 +0000" channel="BBC1HD">
+    <title>EastEnders</title>
+    <desc>Short desc</desc>
+  </programme>
+  <programme start="20261029210000 +0000" stop="20261029220000 +0000" channel="BBC1HD">
+    <title>News</title>
+  </programme>
+  <programme start="20261029220000 +0000" stop="20261029230000 +0000" channel="Dave">
+    <title>Panel Show</title>
+  </programme>
+</tv>

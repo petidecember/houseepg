@@ -1,0 +1,5 @@
+#EXTM3U
+#EXTINF:-1 tvg-id="bbc1.uk" tvg-name="BBC One" tvg-logo="http://example/bbc1.png",BBC One HD
+http://example/bbc1
+#EXTINF:-1 tvg-id="itv1.uk" tvg-name="ITV1",ITV1 HD
+http://example/itv1

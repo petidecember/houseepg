@@ -230,8 +230,9 @@ guide viewer.
   `hungary1.xml` from open-epg.com) plus a **hand-made overlap fixture**.
 - **Golden-file unit tests** on the merge engine: assert the exact expected XMLTV output. Brittle by
   design — the merge rules are the risky part and their exact output is the contract.
-- A new **`integrationTest` Gradle task** (required by `AGENTS.md`, currently missing), backed by
-  MongoDB and a **stub HTTP server** serving the fixtures, proving the pipeline end to end.
+- An **`integrationTest` Gradle task** (required by `AGENTS.md`) that boots the real application on a
+  random port, points its sources at a **stub HTTP server** serving the fixtures, and asserts the feed
+  it serves against the same golden file. MongoDB-backed cases arrive with persistence (slice 4).
 - Verification gate before any completion claim: `./gradlew test`, `./gradlew integrationTest`,
   and for UI changes `cd frontend && npx tsc --noEmit && npm run build` with `frontend/dist/*`
   copied into `src/main/resources/static/`.
