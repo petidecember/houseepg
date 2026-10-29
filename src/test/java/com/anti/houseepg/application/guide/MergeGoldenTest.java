@@ -47,17 +47,17 @@ class MergeGoldenTest {
     void goldenFileHoldsTheRulesTheDesignPromises() {
         String golden = read("/fixtures/overlap-expected.xml");
 
-        // An overlap drops the loser whole: neither of source B's two BBC One programmes survives.
-        assertThat(golden).doesNotContain("<title>Heat</title>");
+        // An overlap drops the loser whole: neither of source B's two Channel One programmes survives.
+        assertThat(golden).doesNotContain("<title>Film Gamma</title>");
         // The winner is emitted verbatim, so source A's description is kept rather than source B's.
-        assertThat(golden).contains("<title>EastEnders</title><desc>Full synopsis</desc>");
-        assertThat(golden).doesNotContain("Short desc");
+        assertThat(golden).contains("<title>Show Alpha</title><desc>Full synopsis</desc>");
+        assertThat(golden).doesNotContain("Short synopsis");
         // The gap source A leaves is filled by source B.
-        assertThat(golden).contains("<title>News</title>");
+        assertThat(golden).contains("<title>Show Delta</title>");
         // An unmatched channel keeps its own id rather than being dropped or renamed.
-        assertThat(golden).contains("channel=\"Dave\"");
+        assertThat(golden).contains("channel=\"ch3\"");
         // Every channel id in the feed is the playlist's tvg-id, never an invented one.
-        assertThat(golden).contains("id=\"bbc1.uk\"", "id=\"itv1.uk\"");
+        assertThat(golden).contains("id=\"ch1.xx\"", "id=\"ch2.xx\"");
     }
 
     private static SourceEpg epg(String sourceId, String resource) {

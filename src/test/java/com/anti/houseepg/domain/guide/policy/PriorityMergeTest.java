@@ -23,8 +23,8 @@ import org.junit.jupiter.api.Test;
 class PriorityMergeTest {
 
     private static final List<Channel> REGISTRY = List.of(
-            new Channel(new ChannelId("bbc1.uk"), "BBC One", null, null, Channel.Origin.PLAYLIST),
-            new Channel(new ChannelId("itv1.uk"), "ITV1", null, null, Channel.Origin.PLAYLIST));
+            new Channel(new ChannelId("ch1.xx"), "Channel One", null, null, Channel.Origin.PLAYLIST),
+            new Channel(new ChannelId("ch2.xx"), "Channel Two", null, null, Channel.Origin.PLAYLIST));
 
     private static final SourceId A = new SourceId("a");
     private static final SourceId B = new SourceId("b");
@@ -32,17 +32,17 @@ class PriorityMergeTest {
     @Test
     void dropsAnOverlappingLowerPriorityProgrammeWholesale() {
         Guide guide = merge(List.of(A, B),
-                source(A, "BBC1",
-                        programme("BBC1", "20:00", "20:30", "EastEnders", "Full synopsis")),
-                source(B, "BBC1HD",
+                source(A, "CH1",
+                        programme("CH1", "20:00", "20:30", "Show Alpha", "Full synopsis")),
+                source(B, "CH1 (HD)",
                         // Overlaps the winner by five minutes: dropped whole, not clipped.
-                        programme("BBC1HD", "20:00", "20:35", "EastEnders", "Short"),
+                        programme("CH1 (HD)", "20:00", "20:35", "Show Alpha", "Short synopsis"),
                         // Straddles the winner: also dropped whole, leaving its uncovered head empty.
-                        programme("BBC1HD", "19:45", "21:00", "Heat", "Film")));
+                        programme("CH1 (HD)", "19:45", "21:00", "Film Gamma", "Film")));
 
         assertThat(guide.programmes()).hasSize(1);
         Programme winner = guide.programmes().getFirst();
-        assertThat(winner.title()).isEqualTo("EastEnders");
+        assertThat(winner.title()).isEqualTo("Show Alpha");
         assertThat(winner.winningSource()).isEqualTo(A);
         assertThat(winner.description()).isEqualTo("Full synopsis");
         // The hole between 19:45 and 20:00 is not filled with anything.
@@ -52,18 +52,18 @@ class PriorityMergeTest {
     @Test
     void fillsUncoveredStretchesFromTheNextSourceDown() {
         Guide guide = merge(List.of(A, B),
-                source(A, "BBC1", programme("BBC1", "20:00", "20:30", "EastEnders", null)),
-                source(B, "BBC1HD", programme("BBC1HD", "21:00", "22:00", "News", null)));
+                source(A, "CH1", programme("CH1", "20:00", "20:30", "Show Alpha", null)),
+                source(B, "CH1 (HD)", programme("CH1 (HD)", "21:00", "22:00", "Show Delta", null)));
 
-        assertThat(guide.programmes()).extracting(Programme::title).containsExactly("EastEnders", "News");
+        assertThat(guide.programmes()).extracting(Programme::title).containsExactly("Show Alpha", "Show Delta");
         assertThat(guide.programmes()).extracting(Programme::winningSource).containsExactly(A, B);
     }
 
     @Test
     void neverMixesFieldsWithinOneProgramme() {
         Guide guide = merge(List.of(A, B),
-                source(A, "BBC1", programme("BBC1", "20:00", "20:30", "EastEnders", "Full synopsis")),
-                source(B, "BBC1HD", programme("BBC1HD", "20:00", "20:30", "EastEnders", "Short desc")));
+                source(A, "CH1", programme("CH1", "20:00", "20:30", "Show Alpha", "Full synopsis")),
+                source(B, "CH1 (HD)", programme("CH1 (HD)", "20:00", "20:30", "Show Alpha", "Short synopsis")));
 
         assertThat(guide.programmes()).singleElement()
                 .satisfies(programme -> assertThat(programme.description()).isEqualTo("Full synopsis"));
@@ -72,8 +72,8 @@ class PriorityMergeTest {
     @Test
     void priorityOrderDecidesWhichSourceWins() {
         List<SourceEpg> sources = List.of(
-                source(A, "BBC1", programme("BBC1", "20:00", "20:30", "From A", null)),
-                source(B, "BBC1HD", programme("BBC1HD", "20:00", "20:30", "From B", null)));
+                source(A, "CH1", programme("CH1", "20:00", "20:30", "From A", null)),
+                source(B, "CH1 (HD)", programme("CH1 (HD)", "20:00", "20:30", "From B", null)));
 
         assertThat(mergeFrom(List.of(A, B), sources).programmes())
                 .extracting(Programme::title).containsExactly("From A");
@@ -84,17 +84,17 @@ class PriorityMergeTest {
     @Test
     void keepsAnUnmatchedChannelAsAPassThroughUnderItsOwnId() {
         Guide guide = merge(List.of(A, B),
-                source(B, "Dave", programme("Dave", "22:00", "23:00", "Panel Show", null)));
+                source(B, "ch3", programme("ch3", "22:00", "23:00", "Show Epsilon", null)));
 
-        assertThat(guide.channels()).extracting(channel -> channel.id().value()).contains("Dave");
+        assertThat(guide.channels()).extracting(channel -> channel.id().value()).contains("ch3");
         assertThat(guide.programmes()).singleElement()
-                .satisfies(programme -> assertThat(programme.channelId().value()).isEqualTo("Dave"));
+                .satisfies(programme -> assertThat(programme.channelId().value()).isEqualTo("ch3"));
     }
 
     @Test
     void dropsProgrammesForChannelsTheSourceNeverDeclared() {
-        // "Ghost" is not in the source's channel list, so nothing can be matched for it.
-        Guide guide = merge(List.of(B), source(B, "Dave", programme("Ghost", "22:00", "23:00", "Orphan", null)));
+        // "ghost" is not in the source's channel list, so nothing can be matched for it.
+        Guide guide = merge(List.of(B), source(B, "ch3", programme("ghost", "22:00", "23:00", "Orphan", null)));
 
         assertThat(guide.programmes()).isEmpty();
     }
@@ -115,8 +115,9 @@ class PriorityMergeTest {
 
     private static String displayName(String channelId) {
         return switch (channelId) {
-            case "BBC1", "BBC1HD" -> "BBC One";
-            case "Dave" -> "Dave";
+            case "CH1", "CH1 (HD)" -> "Channel One";
+            case "CH2HD" -> "Channel Two";
+            case "ch3" -> "Channel Three";
             default -> channelId;
         };
     }

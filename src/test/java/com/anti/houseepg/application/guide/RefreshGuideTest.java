@@ -41,24 +41,24 @@ class RefreshGuideTest {
 
     private static final String PLAYLIST = """
             #EXTM3U
-            #EXTINF:-1 tvg-id="bbc1.uk" tvg-name="BBC One" tvg-logo="http://example/bbc1.png",BBC One HD
-            http://example/bbc1
-            #EXTINF:-1 tvg-id="itv1.uk" tvg-name="ITV1",ITV1 HD
-            http://example/itv1
+            #EXTINF:-1 tvg-id="ch1.xx" tvg-name="Channel One" tvg-logo="https://example.invalid/icons/ch1.png",Channel One HD
+            http://example.invalid/ch1
+            #EXTINF:-1 tvg-id="ch2.xx" tvg-name="Channel Two",Channel Two HD
+            http://example.invalid/ch2
             """;
 
     private static final String SOURCE_A = """
             <?xml version="1.0" encoding="UTF-8"?>
             <tv source-info-name="Source A">
-              <channel id="BBC1"><display-name>BBC One</display-name></channel>
-              <channel id="ITV1HD"><display-name>ITV1 HD</display-name></channel>
-              <programme start="20261029200000 +0000" stop="20261029203000 +0000" channel="BBC1">
-                <title>EastEnders</title>
+              <channel id="CH1"><display-name>Channel One</display-name></channel>
+              <channel id="CH2HD"><display-name>Channel Two HD</display-name></channel>
+              <programme start="20261029200000 +0000" stop="20261029203000 +0000" channel="CH1">
+                <title>Show Alpha</title>
                 <desc>Full synopsis</desc>
                 <category>Soap</category>
               </programme>
-              <programme start="20261029200000 +0000" stop="20261029210000 +0000" channel="ITV1HD">
-                <title>Film X</title>
+              <programme start="20261029200000 +0000" stop="20261029210000 +0000" channel="CH2HD">
+                <title>Film Beta</title>
               </programme>
             </tv>
             """;
@@ -66,20 +66,20 @@ class RefreshGuideTest {
     private static final String SOURCE_B = """
             <?xml version="1.0" encoding="UTF-8"?>
             <tv source-info-name="Source B">
-              <channel id="BBC1HD"><display-name>BBC One (HD)</display-name></channel>
-              <channel id="Dave"><display-name>Dave</display-name></channel>
-              <programme start="20261029194500 +0000" stop="20261029210000 +0000" channel="BBC1HD">
-                <title>Heat</title>
+              <channel id="CH1 (HD)"><display-name>Channel One (HD)</display-name></channel>
+              <channel id="ch3"><display-name>Channel Three</display-name></channel>
+              <programme start="20261029194500 +0000" stop="20261029210000 +0000" channel="CH1 (HD)">
+                <title>Film Gamma</title>
               </programme>
-              <programme start="20261029200000 +0000" stop="20261029203500 +0000" channel="BBC1HD">
-                <title>EastEnders</title>
+              <programme start="20261029200000 +0000" stop="20261029203500 +0000" channel="CH1 (HD)">
+                <title>Show Alpha</title>
                 <desc>Short desc</desc>
               </programme>
-              <programme start="20261029210000 +0000" stop="20261029220000 +0000" channel="BBC1HD">
-                <title>News</title>
+              <programme start="20261029210000 +0000" stop="20261029220000 +0000" channel="CH1 (HD)">
+                <title>Show Delta</title>
               </programme>
-              <programme start="20261029220000 +0000" stop="20261029230000 +0000" channel="Dave">
-                <title>Panel Show</title>
+              <programme start="20261029220000 +0000" stop="20261029230000 +0000" channel="ch3">
+                <title>Show Epsilon</title>
               </programme>
             </tv>
             """;
@@ -118,18 +118,18 @@ class RefreshGuideTest {
         Guide guide = result.guide();
 
         assertThat(guide.channels()).extracting(channel -> channel.id().value())
-                .containsExactlyInAnyOrder("bbc1.uk", "itv1.uk", "Dave");
-        assertThat(guide.channels()).filteredOn(channel -> channel.id().value().equals("bbc1.uk"))
+                .containsExactlyInAnyOrder("ch1.xx", "ch2.xx", "ch3");
+        assertThat(guide.channels()).filteredOn(channel -> channel.id().value().equals("ch1.xx"))
                 .singleElement()
                 .satisfies(channel -> assertThat(channel.origin()).isEqualTo(Channel.Origin.PLAYLIST));
 
-        // Sorted by canonical channel id, then start time: "Dave" sorts before the lowercase ids.
+        // Sorted by canonical channel id, then start time: "ch3" sorts before the lowercase ids.
         assertThat(guide.programmes()).extracting(Programme::title)
-                .containsExactly("Panel Show", "EastEnders", "News", "Film X");
+                .containsExactly("Show Alpha", "Show Delta", "Film Beta", "Show Epsilon");
         // The lower-priority film that straddles the winner is gone, not clipped.
-        assertThat(guide.programmes()).extracting(Programme::title).doesNotContain("Heat");
+        assertThat(guide.programmes()).extracting(Programme::title).doesNotContain("Film Gamma");
 
-        assertThat(guide.programmes()).filteredOn(programme -> programme.title().equals("EastEnders"))
+        assertThat(guide.programmes()).filteredOn(programme -> programme.title().equals("Show Alpha"))
                 .singleElement()
                 .satisfies(programme -> {
                     assertThat(programme.winningSource().value()).isEqualTo("a");
@@ -146,7 +146,7 @@ class RefreshGuideTest {
         String feed = new XmltvFeedWriter().write(guide);
 
         assertThat(feed).contains("generator-info-name=\"HouseEPG\"");
-        assertThat(feed).contains("channel=\"bbc1.uk\"");
+        assertThat(feed).contains("channel=\"ch1.xx\"");
         assertThat(feed).contains("start=\"20261029200000 +0000\"");
 
         var parsed = new XmltvReader().read(new com.anti.houseepg.domain.guide.model.SourceId("merged"),
@@ -178,7 +178,7 @@ class RefreshGuideTest {
                 .singleElement()
                 .satisfies(health -> assertThat(health.state()).isEqualTo(SourceHealth.State.STALE));
         // Still contributing: the guide did not get worse because of the network error.
-        assertThat(result.guide().programmes()).extracting(Programme::title).contains("News");
+        assertThat(result.guide().programmes()).extracting(Programme::title).contains("Show Delta");
     }
 
     @Test
@@ -187,8 +187,8 @@ class RefreshGuideTest {
 
         Guide guide = withoutPlaylist.refresh().guide();
 
-        assertThat(guide.channels()).extracting(channel -> channel.id().value()).contains("BBC1", "ITV1HD");
-        assertThat(guide.channels()).filteredOn(channel -> channel.id().value().equals("BBC1"))
+        assertThat(guide.channels()).extracting(channel -> channel.id().value()).contains("CH1", "CH2HD");
+        assertThat(guide.channels()).filteredOn(channel -> channel.id().value().equals("CH1"))
                 .singleElement()
                 .satisfies(channel -> assertThat(channel.origin()).isEqualTo(Channel.Origin.PRIMARY_SOURCE));
     }

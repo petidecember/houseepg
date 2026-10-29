@@ -23,23 +23,25 @@ import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 /**
- * Guards the two real provider samples in {@code src/test/resources/fixtures} at scale, driven through
- * the real refresh use case (including the registry seeded from the top-priority source).
+ * Guards the two full-size provider fixtures in {@code src/test/resources/fixtures} at scale, driven
+ * through the real refresh use case (including the registry seeded from the top-priority source).
  *
- * <p>The numbers below are the golden values for those fixtures: if a merge change moves them, that
- * change has to be a deliberate one.
+ * <p>The fixtures are white-labelled: channel ids, names, programme text and icons were replaced with
+ * neutral values while keeping the structure of the originals, including the pairs whose comparison
+ * keys collide within one provider. The numbers below are the golden values for those fixtures: if a
+ * merge change moves them, that change has to be a deliberate one.
  */
-class RealFeedTest {
+class ProviderSamplesTest {
 
-    private static final SourceId IPTV_EPG = new SourceId("iptv-epg");
-    private static final SourceId OPEN_EPG = new SourceId("open-epg");
+    private static final SourceId PROVIDER_A = new SourceId("provider-a");
+    private static final SourceId PROVIDER_B = new SourceId("provider-b");
 
     private static final Map<String, String> FIXTURES = Map.of(
-            "iptv-epg", "/fixtures/real-epg-hu.xml",
-            "open-epg", "/fixtures/real-hungary1.xml");
+            "provider-a", "/fixtures/provider-a.xml",
+            "provider-b", "/fixtures/provider-b.xml");
 
     @Test
-    void mergesTheTwoRealSamplesAtScale() {
+    void mergesTheTwoProviderSamplesAtScale() {
         RefreshResult result = refreshGuide().refresh();
         Guide guide = result.guide();
 
@@ -48,10 +50,11 @@ class RealFeedTest {
         assertThat(guide.programmes()).hasSize(41841);
 
         // The same real channel from two providers lands on one id, and it is the primary source's id.
-        assertThat(channelIds(guide)).filteredOn(id -> id.contains("AMC")).containsExactly("AMC.hu");
+        assertThat(channelIds(guide)).filteredOn(id -> id.startsWith("channel003")).containsExactly("channel003.xx");
 
         // A channel only the second source carries survives as a pass-through, not dropped.
-        assertThat(guide.channels()).filteredOn(channel -> channel.id().value().equals("360 TuneBox.hu"))
+        assertThat(guide.channels())
+                .filteredOn(channel -> channel.id().value().equals("Channel 152 (HD).xx"))
                 .singleElement()
                 .satisfies(channel -> assertThat(channel.origin()).isEqualTo(Channel.Origin.PASS_THROUGH));
 
@@ -62,17 +65,17 @@ class RealFeedTest {
 
         // The winner keeps the winning source, so a slot can be explained later.
         assertThat(guide.programmes()).extracting(Programme::winningSource)
-                .containsOnly(IPTV_EPG, OPEN_EPG);
+                .containsOnly(PROVIDER_A, PROVIDER_B);
     }
 
     /** The real use case, with the transport swapped for the fixture files. */
     private static RefreshGuide refreshGuide() {
         GuideSettings settings = new GuideSettings(
                 List.of(
-                        EpgSource.of("iptv-epg", "IPTV-EPG.org", "fixture:iptv-epg", Credentials.none()),
-                        EpgSource.of("open-epg", "open-epg.com", "fixture:open-epg", Credentials.none())),
+                        EpgSource.of("provider-a", "Provider A", "fixture:provider-a", Credentials.none()),
+                        EpgSource.of("provider-b", "Provider B", "fixture:provider-b", Credentials.none())),
                 Optional.empty());
-        return new RefreshGuide(settings, RealFeedTest::readFixture, noChannelAuthority());
+        return new RefreshGuide(settings, ProviderSamplesTest::readFixture, noChannelAuthority());
     }
 
     private static ChannelAuthorityGateway noChannelAuthority() {
@@ -83,7 +86,7 @@ class RealFeedTest {
 
     private static SourceEpg readFixture(EpgSource source) {
         String resource = FIXTURES.get(source.id().value());
-        try (InputStream input = RealFeedTest.class.getResourceAsStream(resource)) {
+        try (InputStream input = ProviderSamplesTest.class.getResourceAsStream(resource)) {
             if (input == null) {
                 throw new IllegalStateException("missing test resource " + resource);
             }

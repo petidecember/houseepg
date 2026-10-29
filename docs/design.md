@@ -257,7 +257,7 @@ database** so it never touches real guide data.
 | Golden-file tests are brittle | Accepted; the goldens are the contract. |
 | `integrationTest` needs a local MongoDB | Environment-dependent; dedicated test database required. |
 | Large public feeds | The one-country sample runs to thousands of lines; full re-fetch/re-parse may be wasteful and streaming parsing may be needed. |
-| Sparse upstream metadata | open-epg's sample carries only title+desc, so a rich feed can lose to a poor one depending on priority order. |
+| Sparse upstream metadata | One provider's sample carries only title and description, so a rich feed can lose to a poor one depending on priority order. |
 
 ## 14. Rollout
 

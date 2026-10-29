@@ -17,11 +17,11 @@ houseepg:
   # primary source. Point these at the real per-country XMLTV files;
   # the entries below stay disabled until then.
   sources:
-    - id: iptv-epg
-      name: IPTV-EPG.org
-      url: ${HOUSEEPG_SOURCE_IPTV_EPG_URL:}
+    - id: provider-a
+      name: Provider A
+      url: ${HOUSEEPG_SOURCE_A_URL:}
       enabled: false
-    - id: open-epg
-      name: open-epg.com
-      url: ${HOUSEEPG_SOURCE_OPEN_EPG_URL:}
+    - id: provider-b
+      name: Provider B
+      url: ${HOUSEEPG_SOURCE_B_URL:}
       enabled: false

@@ -10,21 +10,21 @@ import org.junit.jupiter.api.Test;
 /** The aggregate invariant: a feed can never reference a channel it does not declare. */
 class GuideTest {
 
-    private static final Channel BBC_ONE =
-            new Channel(new ChannelId("bbc1.uk"), "BBC One", null, null, Channel.Origin.PLAYLIST);
+    private static final Channel CHANNEL_ONE =
+            new Channel(new ChannelId("ch1.xx"), "Channel One", null, null, Channel.Origin.PLAYLIST);
 
     @Test
     void rejectsAProgrammeForAnUndeclaredChannel() {
-        Programme orphan = programme("itv1.uk");
+        Programme orphan = programme("ch2.xx");
 
-        assertThatThrownBy(() -> new Guide(List.of(BBC_ONE), List.of(orphan)))
+        assertThatThrownBy(() -> new Guide(List.of(CHANNEL_ONE), List.of(orphan)))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("itv1.uk");
+                .hasMessageContaining("ch2.xx");
     }
 
     @Test
     void acceptsAProgrammeForADeclaredChannel() {
-        Guide guide = new Guide(List.of(BBC_ONE), List.of(programme("bbc1.uk")));
+        Guide guide = new Guide(List.of(CHANNEL_ONE), List.of(programme("ch1.xx")));
 
         assertThat(guide.programmes()).hasSize(1);
         assertThat(Guide.empty().channels()).isEmpty();
@@ -33,6 +33,6 @@ class GuideTest {
     private static Programme programme(String channelId) {
         return new Programme(new ChannelId(channelId),
                 new Slot(OffsetDateTime.parse("2026-10-29T20:00:00Z"), OffsetDateTime.parse("2026-10-29T20:30:00Z")),
-                new SourceId("a"), "EastEnders", null, null, null, null);
+                new SourceId("a"), "Show Alpha", null, null, null, null);
     }
 }

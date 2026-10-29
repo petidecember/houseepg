@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<tv source-info-name="Source A">
-  <channel id="BBC1"><display-name>BBC One</display-name></channel>
-  <channel id="ITV1HD"><display-name>ITV1 HD</display-name></channel>
-  <programme start="20261029200000 +0000" stop="20261029203000 +0000" channel="BBC1">
-    <title>EastEnders</title>
+<tv source-info-name="Provider A">
+  <channel id="CH1"><display-name>Channel One</display-name></channel>
+  <channel id="CH2HD"><display-name>Channel Two HD</display-name></channel>
+  <programme start="20261029200000 +0000" stop="20261029203000 +0000" channel="CH1">
+    <title>Show Alpha</title>
     <desc>Full synopsis</desc>
-    <category>Soap</category>
+    <category>Genre A</category>
   </programme>
-  <programme start="20261029200000 +0000" stop="20261029210000 +0000" channel="ITV1HD">
-    <title>Film X</title>
+  <programme start="20261029200000 +0000" stop="20261029210000 +0000" channel="CH2HD">
+    <title>Film Beta</title>
   </programme>
 </tv>
