@@ -13,6 +13,8 @@ houseepg:
   # Ended programmes older than this are pruned from the store.
   retention: 7d
   timeout: 60s
+  # The file the source order is written back into (ADR-0005). Empty keeps the order in memory only.
+  config-file: ${HOUSEEPG_CONFIG_FILE:src/main/resources/application.yaml}
   scheduler:
     tick: 60s
   # Priority order, highest first: the first enabled source is the

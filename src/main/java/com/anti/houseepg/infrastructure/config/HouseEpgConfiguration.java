@@ -1,5 +1,12 @@
 package com.anti.houseepg.infrastructure.config;
 
+import com.anti.houseepg.application.config.DumpConfiguration;
+import com.anti.houseepg.application.config.ReloadConfiguration;
+import com.anti.houseepg.application.config.ReorderSources;
+import com.anti.houseepg.application.config.ReseedRegistry;
+import com.anti.houseepg.application.config.port.ConfigDumpWriter;
+import com.anti.houseepg.application.config.port.DeclarationReader;
+import com.anti.houseepg.application.config.port.SourceOrderStore;
 import com.anti.houseepg.application.guide.GuideSettings;
 import com.anti.houseepg.application.guide.RefreshGuide;
 import com.anti.houseepg.application.guide.ServeGuide;
@@ -9,10 +16,13 @@ import com.anti.houseepg.application.guide.port.Credentials;
 import com.anti.houseepg.application.guide.port.EpgSource;
 import com.anti.houseepg.application.guide.port.EpgSourceGateway;
 import com.anti.houseepg.application.guide.port.GuideStore;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
@@ -25,11 +35,8 @@ public class HouseEpgConfiguration {
 
     @Bean
     GuideSettings guideSettings(HouseEpgProperties properties) {
-        List<EpgSource> sources = properties.enabledSources().stream()
-                .map(source -> EpgSource.of(source.id(), source.name(), source.url(), credentials(source),
-                        source.refreshIntervalOr()))
-                .toList();
-        return new GuideSettings(sources, Optional.ofNullable(properties.playlistUrl()), properties.retention());
+        return new GuideSettings(ConfiguredSources.toSources(properties.enabledSources()),
+                Optional.ofNullable(properties.playlistUrl()), properties.retention());
     }
 
     @Bean
@@ -43,12 +50,42 @@ public class HouseEpgConfiguration {
         return new ServeGuide(refreshGuide, guideStore, matchStore);
     }
 
-    private static Credentials credentials(HouseEpgProperties.SourceProperties source) {
-        boolean hasBasicAuth = source.username() != null && !source.username().isBlank();
-        boolean hasHeader = source.headerName() != null && !source.headerName().isBlank();
-        if (!hasBasicAuth && !hasHeader) {
-            return Credentials.none();
-        }
-        return new Credentials(source.username(), source.password(), source.headerName(), source.headerValue());
+    /** The YAML file the order is written back into; empty means the order is in-memory only (ADR-0005). */
+    @Bean
+    SourceOrderStore sourceOrderStore(@Value("${houseepg.config-file:}") String configFile) {
+        return new YamlSourceOrderStore(configFile);
+    }
+
+    @Bean
+    DeclarationReader declarationReader(Environment environment,
+            @Value("${houseepg.config-file:}") String configFile) {
+        return new YamlDeclarationReader(environment, configFile);
+    }
+
+    @Bean
+    ConfigDumpWriter configDumpWriter() {
+        return new LoggingConfigDumpWriter();
+    }
+
+    @Bean
+    ReorderSources reorderSources(GuideSettings settings, SourceOrderStore store) {
+        return new ReorderSources(settings, store);
+    }
+
+    @Bean
+    ReloadConfiguration reloadConfiguration(GuideSettings settings, DeclarationReader declarations,
+            RefreshGuide refreshGuide) {
+        return new ReloadConfiguration(settings, declarations, () -> refreshGuide.refreshDue(Instant.now()));
+    }
+
+    @Bean
+    DumpConfiguration dumpConfiguration(GuideSettings settings, ConfigDumpWriter writer) {
+        return new DumpConfiguration(settings, writer);
+    }
+
+    @Bean
+    ReseedRegistry reseedRegistry(GuideSettings settings, GuideStore guideStore,
+            ChannelAuthorityGateway channelAuthority) {
+        return new ReseedRegistry(settings, guideStore, channelAuthority);
     }
 }
