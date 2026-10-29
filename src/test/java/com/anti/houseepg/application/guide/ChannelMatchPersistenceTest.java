@@ -12,7 +12,8 @@ import com.anti.houseepg.domain.guide.policy.ChannelMatch;
 import com.anti.houseepg.domain.guide.policy.MatchConfidence;
 import com.anti.houseepg.domain.guide.policy.MatchState;
 import com.anti.houseepg.domain.guide.policy.SourceChannelRef;
-import com.anti.houseepg.infrastructure.match.InMemoryChannelMatchStore;
+import com.anti.houseepg.support.InMemoryChannelMatchStore;
+import com.anti.houseepg.support.InMemoryGuideStore;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +30,7 @@ class ChannelMatchPersistenceTest {
     private static final Optional<String> PLAYLIST = Optional.of("fixture:playlist.m3u");
 
     private final InMemoryChannelMatchStore store = new InMemoryChannelMatchStore();
+    private final InMemoryGuideStore guideStore = new InMemoryGuideStore();
     private final List<Channel> playlist = List.of(
             playlistChannel("amc.xx", "AMC"),
             playlistChannel("bravo.xx", "Bravo"));
@@ -123,7 +125,7 @@ class ChannelMatchPersistenceTest {
                 throw new IllegalStateException("source " + source.id().value() + " is unavailable");
             }
             return document;
-        }, location -> playlist, store);
+        }, location -> playlist, store, guideStore);
     }
 
     private static Channel playlistChannel(String id, String displayName) {

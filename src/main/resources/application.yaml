@@ -10,9 +10,11 @@ houseepg:
   # Channel authority. Its tvg-ids become the emitted XMLTV channel ids.
   # Leave empty to seed the registry from the top-priority source instead.
   playlist-url: ${HOUSEEPG_PLAYLIST_URL:}
-  # How long a built guide is served before it is rebuilt.
-  cache-ttl: 1h
+  # Ended programmes older than this are pruned from the store.
+  retention: 7d
   timeout: 60s
+  scheduler:
+    tick: 60s
   # Priority order, highest first: the first enabled source is the
   # primary source. Point these at the real per-country XMLTV files;
   # the entries below stay disabled until then.
@@ -20,6 +22,8 @@ houseepg:
     - id: provider-a
       name: Provider A
       url: ${HOUSEEPG_SOURCE_A_URL:}
+      # Each source refreshes on its own interval (default 8h).
+      refresh-interval: 8h
       enabled: false
     - id: provider-b
       name: Provider B

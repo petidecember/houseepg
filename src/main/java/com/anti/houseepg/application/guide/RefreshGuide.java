@@ -4,30 +4,36 @@ import com.anti.houseepg.application.guide.port.ChannelAuthorityGateway;
 import com.anti.houseepg.application.guide.port.ChannelMatchStore;
 import com.anti.houseepg.application.guide.port.EpgSource;
 import com.anti.houseepg.application.guide.port.EpgSourceGateway;
+import com.anti.houseepg.application.guide.port.GuideStore;
 import com.anti.houseepg.domain.guide.model.Channel;
 import com.anti.houseepg.domain.guide.model.ChannelId;
+import com.anti.houseepg.domain.guide.model.Guide;
 import com.anti.houseepg.domain.guide.model.SourceEpg;
 import com.anti.houseepg.domain.guide.model.SourceHealth;
 import com.anti.houseepg.domain.guide.model.SourceId;
+import com.anti.houseepg.domain.guide.model.SourceProgramme;
 import com.anti.houseepg.domain.guide.policy.ChannelMatch;
 import com.anti.houseepg.domain.guide.policy.ChannelMatching;
 import com.anti.houseepg.domain.guide.policy.PriorityMerge;
 import com.anti.houseepg.domain.guide.policy.SourceChannelRef;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Use case: read every source in priority order, match its channels onto the registry, and merge. A
- * source that fails keeps contributing its last good document, so the served guide never gets worse
- * because of a network error (design §8).
+ * Use case: refresh the sources that are due, match their channels onto the registry, merge, and
+ * materialize the result (design §7, §8).
  *
- * <p>The registry is the authority and is kept across refreshes: a routine refresh never re-seeds it,
- * because that would change emitted ids under the DVR (design §6.4, ADR-0002).
+ * <p>Refreshes are serialized: a scheduled tick and a manual "refresh now" must never write the
+ * layers at the same time. A source that fails keeps its last good normalized data, is marked
+ * unhealthy, and the materialized guide keeps serving what it had.
  */
 public class RefreshGuide {
 
@@ -37,79 +43,164 @@ public class RefreshGuide {
     private final EpgSourceGateway epgSources;
     private final ChannelAuthorityGateway channelAuthority;
     private final ChannelMatchStore matchStore;
+    private final GuideStore store;
     private final Map<SourceId, SourceEpg> lastGood = new LinkedHashMap<>();
-    private List<Channel> registry = List.of();
 
     public RefreshGuide(GuideSettings settings, EpgSourceGateway epgSources,
-            ChannelAuthorityGateway channelAuthority, ChannelMatchStore matchStore) {
+            ChannelAuthorityGateway channelAuthority, ChannelMatchStore matchStore, GuideStore store) {
         this.settings = settings;
         this.epgSources = epgSources;
         this.channelAuthority = channelAuthority;
         this.matchStore = matchStore;
+        this.store = store;
     }
 
-    public RefreshResult refresh() {
-        List<SourceEpg> read = new ArrayList<>();
+    /** The configured sources, so the manual-refresh endpoint can recognise a path variable. */
+    public List<EpgSource> sources() {
+        return settings.sources();
+    }
+
+    /** Manual refresh: re-fetch every source now. */
+    public synchronized RefreshResult refresh() {
+        return refreshAll(settings.sources().stream().map(EpgSource::id).toList());
+    }
+
+    /** Manual refresh of one source; the others contribute their stored data. */
+    public synchronized RefreshResult refreshSource(SourceId source) {
+        return refreshAll(List.of(source));
+    }
+
+    /** Scheduled refresh: only the sources whose interval elapsed are fetched. */
+    public synchronized RefreshResult refreshDue(Instant now) {
+        List<SourceId> due = settings.sources().stream()
+                .filter(source -> due(source, now))
+                .map(EpgSource::id)
+                .toList();
+        return refreshAll(due);
+    }
+
+    private RefreshResult refreshAll(Collection<SourceId> forced) {
+        Instant now = Instant.now();
+        Set<SourceId> force = Set.copyOf(forced);
+
+        List<SourceEpg> documents = new ArrayList<>();
         List<SourceHealth> health = new ArrayList<>();
+        Map<SourceId, SourceHealth> storedHealth = new LinkedHashMap<>();
+        store.health().forEach(entry -> storedHealth.put(entry.source(), entry));
 
         for (EpgSource source : settings.sources()) {
-            try {
-                SourceEpg document = epgSources.read(source);
-                if (document.isEmpty()) {
-                    throw new IllegalStateException("source carries no channels and no programmes");
-                }
-                rememberLastGood(document);
-                read.add(document);
-                health.add(SourceHealth.ok(source.id(), source.displayName(), document.programmes().size()));
-            } catch (RuntimeException e) {
-                SourceEpg fallback = lastGood.get(source.id());
-                if (fallback == null) {
-                    health.add(SourceHealth.failed(source.id(), source.displayName(), describe(e)));
-                } else {
-                    read.add(fallback);
-                    health.add(SourceHealth.stale(source.id(), source.displayName(),
-                            fallback.programmes().size(), describe(e)));
-                }
-                log.warn("Source {} is unavailable: {}", source.id(), describe(e));
+            boolean fetch = force.contains(source.id()) || due(source, now);
+            SourceEpg document = fetch
+                    ? fetch(source, health)
+                    : fromStore(source, health, storedHealth.get(source.id()));
+            if (document != null) {
+                documents.add(document);
             }
         }
 
-        ChannelMatching.Match match = ChannelMatching.match(seededRegistry(read), read, knownDecisions());
-        saveAuto(match.matches());
+        Instant cutoff = now.minus(settings.retention());
+        documents = retained(documents, cutoff);
 
-        List<SourceId> priority = read.stream().map(SourceEpg::source).toList();
-        return new RefreshResult(
-                PriorityMerge.merge(match.channels(), read, match.canonicalIds(), priority),
-                health,
-                Instant.now(),
-                match.matches());
+        List<Channel> registry = registry(documents);
+        ChannelMatching.Match match = ChannelMatching.match(registry, documents, knownDecisions());
+        saveAuto(match.matches());
+        documents.forEach(document -> store.saveNormalized(document, match.canonicalIds()));
+
+        List<SourceId> priority = documents.stream().map(SourceEpg::source).toList();
+        Guide guide = PriorityMerge.merge(match.channels(), documents, match.canonicalIds(), priority);
+
+        store.prune(cutoff);
+        store.saveMergedGuide(guide, now);
+        return new RefreshResult(guide, health, now, match.matches());
+    }
+
+    /** Design §7 retention: a programme that ended before the cutoff is not part of the guide at all. */
+    private static List<SourceEpg> retained(List<SourceEpg> documents, Instant cutoff) {
+        List<SourceEpg> retained = new ArrayList<>();
+        for (SourceEpg document : documents) {
+            List<SourceProgramme> kept = document.programmes().stream()
+                    .filter(programme -> !programme.slot().stop().toInstant().isBefore(cutoff))
+                    .toList();
+            retained.add(new SourceEpg(document.source(), document.channels(), kept));
+        }
+        return retained;
+    }
+
+    /** Fetches one source; on failure its last good normalized data still contributes (design §8). */
+    private SourceEpg fetch(EpgSource source, List<SourceHealth> health) {
+        try {
+            SourceEpg document = epgSources.read(source);
+            if (document.isEmpty()) {
+                throw new IllegalStateException("source carries no channels and no programmes");
+            }
+            SourceHealth ok = SourceHealth.ok(source.id(), source.displayName(), document.programmes().size());
+            health.add(ok);
+            store.saveHealth(ok);
+            return document;
+        } catch (RuntimeException e) {
+            String error = describe(e);
+            Optional<SourceEpg> fallback = store.normalized(source.id());
+            SourceHealth status = fallback
+                    .map(document -> SourceHealth.stale(source.id(), source.displayName(),
+                            document.programmes().size(), error))
+                    .orElseGet(() -> SourceHealth.failed(source.id(), source.displayName(), error));
+            health.add(status);
+            store.saveHealth(status);
+            log.warn("Source {} is unavailable: {}", source.id(), error);
+            return fallback.orElse(null);
+        }
+    }
+
+    private SourceEpg fromStore(EpgSource source, List<SourceHealth> health, SourceHealth previous) {
+        Optional<SourceEpg> document = store.normalized(source.id());
+        if (document.isEmpty()) {
+            health.add(previous != null ? previous
+                    : SourceHealth.failed(source.id(), source.displayName(), "not refreshed yet"));
+            return null;
+        }
+        health.add(previous != null ? previous
+                : SourceHealth.stale(source.id(), source.displayName(), document.get().programmes().size(),
+                        "not refreshed in this pass"));
+        return document.get();
+    }
+
+    private boolean due(EpgSource source, Instant now) {
+        return store.rawSnapshot(source.id())
+                .map(snapshot -> !snapshot.fetchedAt().plus(source.refreshInterval()).isAfter(now))
+                .orElse(true);
     }
 
     /**
-     * The playlist is the authority when one is configured; when it is not, the registry is seeded
-     * once from the top-priority source and then frozen. Either way a failed read keeps the registry
-     * the previous refresh used, so ids cannot drift because of a transient outage.
+     * The playlist is the authority when one is configured. Its id set is persisted, so a failed read
+     * keeps the ids the DVR already knows; without a playlist the registry is seeded once from the
+     * top-priority source and then frozen (design §6.4, ADR-0002).
      */
-    private List<Channel> seededRegistry(List<SourceEpg> read) {
+    private List<Channel> registry(List<SourceEpg> documents) {
+        List<Channel> stored = store.registry();
         var location = settings.playlistLocation();
         if (location.isPresent()) {
             List<Channel> fromPlaylist = readPlaylist(location.get());
             if (!fromPlaylist.isEmpty()) {
-                registry = fromPlaylist;
+                store.saveRegistry(fromPlaylist);
+                return fromPlaylist;
             }
-            return registry;
+            return stored;
         }
-        if (registry.isEmpty()) {
-            registry = seedFromPrimarySource(read);
+        if (!stored.isEmpty()) {
+            return stored;
         }
-        return registry;
+        List<Channel> seeded = seedFromPrimarySource(documents);
+        if (!seeded.isEmpty()) {
+            store.saveRegistry(seeded);
+        }
+        return seeded;
     }
 
     private List<Channel> readPlaylist(String location) {
         try {
             List<Channel> channels = channelAuthority.channels(location);
             if (channels.isEmpty()) {
-                log.warn("Channel authority {} returned no channels; keeping the current registry", location);
+                log.warn("Channel authority {} returned no channels; keeping the stored registry", location);
             }
             return channels;
         } catch (RuntimeException e) {
@@ -119,9 +210,9 @@ public class RefreshGuide {
     }
 
     /** Only the configured top-priority source may seed the registry, never whichever one happens to be up. */
-    private List<Channel> seedFromPrimarySource(List<SourceEpg> read) {
+    private List<Channel> seedFromPrimarySource(List<SourceEpg> documents) {
         SourceId primary = settings.sources().isEmpty() ? null : settings.sources().getFirst().id();
-        return read.stream()
+        return documents.stream()
                 .filter(document -> document.source().equals(primary))
                 .findFirst()
                 .map(document -> document.channels().stream()
@@ -145,10 +236,6 @@ public class RefreshGuide {
         if (!automatic.isEmpty()) {
             matchStore.saveAuto(automatic);
         }
-    }
-
-    private void rememberLastGood(SourceEpg document) {
-        lastGood.put(document.source(), document);
     }
 
     private static String describe(RuntimeException e) {

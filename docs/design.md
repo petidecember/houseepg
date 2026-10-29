@@ -201,13 +201,20 @@ Indexes: `programmes(canonicalChannelId, start)`, `programmes(sourceId, canonica
 `programmes(stop)` for retention, `mergedProgrammes(canonicalChannelId, start)`,
 `sourceChannels(sourceId, sourceChannelId)` unique, `canonicalChannels(id)` unique.
 
-**Retention:** programmes that ended more than ~7 days ago are pruned. One raw snapshot per source is
-kept (the last good one).
+**Retention:** programmes that ended more than ~7 days ago are pruned, and they are dropped before the
+merge, so the materialized guide never carries them either. One raw snapshot per source is kept (the
+last good one); a failed fetch never writes one.
+
+**Reads never re-merge.** `GET /xmltv` and the UI read layer 3; the refresh is the only writer. The
+database name is `houseepg.mongodb.database` (default `houseepg`) so tests can point the same
+application at a dedicated database.
 
 ## 8. Refresh and failure policy
 
-- Each source has its own **scheduled refresh interval** (default 6–12 h, configurable) plus a
-  **manual "refresh now"**.
+- Each source has its own **scheduled refresh interval** (default 8 h, configurable per source) plus a
+  **manual "refresh now"** (`POST /api/sources/{id}/refresh`). A scheduler tick (default 60 s) decides
+  what is due; refreshes are serialized, so a tick and a manual refresh never write the layers at the
+  same time.
 - On success: new raw snapshot → re-normalize → re-merge → re-materialize.
 - On **failure, timeout, or empty/unparseable response**: the source keeps its **last good data**,
   is marked **unhealthy** in the UI, and the **served guide never degrades because of a network

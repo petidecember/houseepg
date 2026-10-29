@@ -32,6 +32,13 @@ import org.springframework.test.context.DynamicPropertySource;
 class FeedIntegrationTest {
 
     private static final HttpServer STUB = startStub();
+
+    static {
+        // Runs before the Spring context, so a previous run's materialized guide cannot be served.
+        try (var client = com.mongodb.client.MongoClients.create("mongodb://127.0.0.1:27017")) {
+            client.getDatabase("houseepg_test").drop();
+        }
+    }
     private static final String STUB_BASE = "http://127.0.0.1:" + STUB.getAddress().getPort();
     private static final HttpClient CLIENT = HttpClient.newHttpClient();
 
@@ -49,6 +56,9 @@ class FeedIntegrationTest {
         registry.add("houseepg.sources[1].name", () -> "Source B");
         registry.add("houseepg.sources[1].url", () -> STUB_BASE + "/overlap-source-b.xml");
         registry.add("houseepg.sources[1].enabled", () -> "true");
+        // A dedicated test database: the integration suite must never touch real guide data.
+        registry.add("spring.data.mongodb.uri", () -> "mongodb://127.0.0.1:27017");
+        registry.add("houseepg.mongodb.database", () -> "houseepg_test");
     }
 
     @AfterAll

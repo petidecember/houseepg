@@ -1,5 +1,6 @@
 package com.anti.houseepg.infrastructure.config;
 
+import com.anti.houseepg.application.guide.port.EpgSource;
 import java.time.Duration;
 import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -12,12 +13,12 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public record HouseEpgProperties(
         String playlistUrl,
         List<SourceProperties> sources,
-        Duration cacheTtl,
+        Duration retention,
         Duration timeout) {
 
     public HouseEpgProperties {
         sources = sources == null ? List.of() : List.copyOf(sources);
-        cacheTtl = cacheTtl == null ? Duration.ofHours(1) : cacheTtl;
+        retention = retention == null ? Duration.ofDays(7) : retention;
         timeout = timeout == null ? Duration.ofSeconds(60) : timeout;
     }
 
@@ -34,7 +35,13 @@ public record HouseEpgProperties(
             String password,
             String headerName,
             String headerValue,
-            Boolean enabled) {
+            Boolean enabled,
+            Duration refreshInterval) {
+
+        /** Design §8: 8 h unless configured otherwise. */
+        public Duration refreshIntervalOr() {
+            return refreshInterval == null ? EpgSource.DEFAULT_REFRESH_INTERVAL : refreshInterval;
+        }
 
         public boolean isEnabled() {
             return enabled == null || enabled;

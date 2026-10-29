@@ -18,8 +18,9 @@ import com.anti.houseepg.domain.guide.policy.MatchConfidence;
 import com.anti.houseepg.domain.guide.policy.MatchState;
 import com.anti.houseepg.domain.guide.policy.SourceChannelRef;
 import com.anti.houseepg.infrastructure.net.HttpFetcher;
-import com.anti.houseepg.infrastructure.match.InMemoryChannelMatchStore;
+import com.anti.houseepg.support.InMemoryChannelMatchStore;
 import com.anti.houseepg.infrastructure.playlist.M3uChannelAuthority;
+import com.anti.houseepg.support.InMemoryGuideStore;
 import com.anti.houseepg.interfaces.web.XmltvFeedWriter;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -95,6 +96,7 @@ class RefreshGuideTest {
     private final AtomicBoolean sourceBFails = new AtomicBoolean(false);
     private final AtomicBoolean playlistFails = new AtomicBoolean(false);
     private final InMemoryChannelMatchStore matchStore = new InMemoryChannelMatchStore();
+    private final InMemoryGuideStore guideStore = new InMemoryGuideStore();
     private String base;
     private ServeGuide serveGuide;
 
@@ -262,7 +264,7 @@ class RefreshGuideTest {
 
     private ServeGuide serveGuide(Optional<String> playlistLocation, boolean withBothSources) {
         GuideSettings settings = new GuideSettings(sources(withBothSources), playlistLocation);
-        return new ServeGuide(refreshGuide(settings), Duration.ofHours(1));
+        return new ServeGuide(refreshGuide(settings), guideStore, matchStore);
     }
 
     private List<EpgSource> sources(boolean withBothSources) {
@@ -275,10 +277,10 @@ class RefreshGuideTest {
 
     private RefreshGuide refreshGuide(GuideSettings settings) {
         HouseEpgProperties properties =
-                new HouseEpgProperties(null, List.of(), Duration.ofHours(1), Duration.ofSeconds(10));
+                new HouseEpgProperties(null, List.of(), Duration.ofDays(7), Duration.ofSeconds(10));
         HttpFetcher fetcher = new HttpFetcher(properties);
-        return new RefreshGuide(settings, new HttpEpgSourceGateway(fetcher, new XmltvReader()),
-                new M3uChannelAuthority(fetcher), matchStore);
+        return new RefreshGuide(settings, new HttpEpgSourceGateway(fetcher, new XmltvReader(), guideStore),
+                new M3uChannelAuthority(fetcher), matchStore, guideStore);
     }
 
     private static void respond(HttpExchange exchange, int status, String body) throws IOException {

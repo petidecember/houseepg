@@ -1,4 +1,4 @@
-package com.anti.houseepg.infrastructure.match;
+package com.anti.houseepg.support;
 
 import com.anti.houseepg.application.guide.port.ChannelMatchStore;
 import com.anti.houseepg.domain.guide.policy.ChannelMatch;
@@ -6,13 +6,8 @@ import com.anti.houseepg.domain.guide.policy.SourceChannelRef;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import org.springframework.stereotype.Component;
 
-/**
- * Adapter: keeps matches in memory for the lifetime of the process. HOU-5 replaces this with durable
- * storage; until then a restart re-runs matching from scratch.
- */
-@Component
+/** Test double for the match store: same no-downgrade contract, in memory. */
 public class InMemoryChannelMatchStore implements ChannelMatchStore {
 
     private final Map<SourceChannelRef, ChannelMatch> matches = new ConcurrentHashMap<>();

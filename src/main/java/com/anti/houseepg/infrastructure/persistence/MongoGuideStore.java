@@ -1,0 +1,305 @@
+package com.anti.houseepg.infrastructure.persistence;
+
+import static com.mongodb.client.model.Filters.eq;
+import static com.mongodb.client.model.Filters.lt;
+
+import com.anti.houseepg.application.guide.port.GuideStore;
+import com.anti.houseepg.domain.guide.model.Channel;
+import com.anti.houseepg.domain.guide.model.ChannelId;
+import com.anti.houseepg.domain.guide.model.Guide;
+import com.anti.houseepg.domain.guide.model.Programme;
+import com.anti.houseepg.domain.guide.model.RawSnapshot;
+import com.anti.houseepg.domain.guide.model.Slot;
+import com.anti.houseepg.domain.guide.model.SourceChannel;
+import com.anti.houseepg.domain.guide.model.SourceEpg;
+import com.anti.houseepg.domain.guide.model.SourceHealth;
+import com.anti.houseepg.domain.guide.model.SourceId;
+import com.anti.houseepg.domain.guide.model.SourceProgramme;
+import com.anti.houseepg.domain.guide.model.StoredGuide;
+import com.anti.houseepg.domain.guide.policy.SourceChannelRef;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.IndexOptions;
+import com.mongodb.client.model.Indexes;
+import com.mongodb.client.model.ReplaceOptions;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Date;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
+import org.bson.Document;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+
+/** Adapter: the three persistence layers in MongoDB, one collection per layer (design §7). */
+@Component
+public class MongoGuideStore implements GuideStore {
+
+    static final String RAW_SNAPSHOTS = "rawSnapshots";
+    static final String PROGRAMMES = "programmes";
+    static final String CANONICAL_CHANNELS = "canonicalChannels";
+    static final String MERGED_CHANNELS = "mergedChannels";
+    static final String MERGED_PROGRAMMES = "mergedProgrammes";
+    static final String GUIDE_MARKERS = "guideMarkers";
+    static final String SOURCE_HEALTH = "sourceHealth";
+    static final String GUIDE_MARKER_ID = "merged";
+
+    private static final Logger log = LoggerFactory.getLogger(MongoGuideStore.class);
+
+    private final MongoDatabase database;
+    private final AtomicBoolean indexesEnsured = new AtomicBoolean();
+
+    public MongoGuideStore(MongoDatabase database) {
+        this.database = database;
+    }
+
+    /**
+     * Indexes are created on first use rather than at startup, so the application still boots when the
+     * database happens to be down and unit tests never need one (design §7).
+     */
+    private void ensureIndexes() {
+        if (!indexesEnsured.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            programmes().createIndex(Indexes.compoundIndex(Indexes.ascending("canonicalChannelId"),
+                    Indexes.ascending("start")));
+            programmes().createIndex(Indexes.compoundIndex(Indexes.ascending("sourceId"),
+                    Indexes.ascending("canonicalChannelId")));
+            programmes().createIndex(Indexes.ascending("stop"));
+            mergedProgrammes().createIndex(Indexes.compoundIndex(Indexes.ascending("channelId"),
+                    Indexes.ascending("start")));
+        } catch (RuntimeException e) {
+            indexesEnsured.set(false);
+            log.warn("Could not ensure MongoDB indexes yet: {}", e.toString());
+        }
+    }
+
+    private MongoCollection<Document> collection(String name) {
+        return database.getCollection(name);
+    }
+
+    private MongoCollection<Document> programmes() {
+        return collection(PROGRAMMES);
+    }
+
+    private MongoCollection<Document> mergedProgrammes() {
+        return collection(MERGED_PROGRAMMES);
+    }
+
+    @Override
+    public Optional<RawSnapshot> rawSnapshot(SourceId source) {
+        ensureIndexes();
+        Document document = collection(RAW_SNAPSHOTS).find(eq("_id", source.value())).first();
+        if (document == null) {
+            return Optional.empty();
+        }
+        return Optional.of(new RawSnapshot(source, instant(document.get("fetchedAt")),
+                document.getString("content")));
+    }
+
+    @Override
+    public void saveRawSnapshot(RawSnapshot snapshot) {
+        ensureIndexes();
+        Document document = new Document("_id", snapshot.source().value())
+                .append("fetchedAt", date(snapshot.fetchedAt()))
+                .append("content", snapshot.content());
+        collection(RAW_SNAPSHOTS).replaceOne(eq("_id", document.get("_id")), document,
+                new ReplaceOptions().upsert(true));
+    }
+
+    @Override
+    public Optional<SourceEpg> normalized(SourceId source) {
+        ensureIndexes();
+        List<Document> rows = programmes().find(eq("sourceId", source.value())).into(new ArrayList<>());
+        if (rows.isEmpty()) {
+            return Optional.empty();
+        }
+        Map<String, SourceChannel> channels = new LinkedHashMap<>();
+        List<SourceProgramme> restored = new ArrayList<>();
+        for (Document row : rows) {
+            String sourceChannelId = row.getString("sourceChannelId");
+            channels.computeIfAbsent(sourceChannelId,
+                    key -> new SourceChannel(key, row.getString("sourceChannelName"), null));
+            restored.add(new SourceProgramme(sourceChannelId, slot(row), row.getString("title"),
+                    row.getString("description"), row.getString("category"), row.getString("episodeNumber"),
+                    row.getString("iconUrl")));
+        }
+        return Optional.of(new SourceEpg(source, List.copyOf(channels.values()), restored));
+    }
+
+    @Override
+    public void saveNormalized(SourceEpg document, Map<SourceChannelRef, ChannelId> canonicalIds) {
+        ensureIndexes();
+        programmes().deleteMany(eq("sourceId", document.source().value()));
+        Map<String, String> names = new LinkedHashMap<>();
+        document.channels().forEach(channel -> names.put(channel.id(), channel.displayName()));
+        List<Document> rows = document.programmes().stream()
+                .map(programme -> new Document()
+                        .append("sourceId", document.source().value())
+                        .append("sourceChannelId", programme.sourceChannelId())
+                        .append("sourceChannelName", names.get(programme.sourceChannelId()))
+                        .append("canonicalChannelId",
+                                canonicalId(canonicalIds, document.source(), programme.sourceChannelId()))
+                        .append("start", time(programme.slot().start()))
+                        .append("stop", time(programme.slot().stop()))
+                        .append("title", programme.title())
+                        .append("description", programme.description())
+                        .append("category", programme.category())
+                        .append("episodeNumber", programme.episodeNumber())
+                        .append("iconUrl", programme.iconUrl()))
+                .toList();
+        if (!rows.isEmpty()) {
+            programmes().insertMany(rows);
+        }
+    }
+
+    @Override
+    public Optional<StoredGuide> mergedGuide() {
+        ensureIndexes();
+        Document marker = collection(GUIDE_MARKERS).find(eq("_id", GUIDE_MARKER_ID)).first();
+        if (marker == null) {
+            return Optional.empty();
+        }
+        List<Channel> channels = collection(MERGED_CHANNELS).find().into(new ArrayList<>()).stream()
+                .map(document -> new Channel(new ChannelId(document.getString("_id")),
+                        document.getString("displayName"), document.getString("iconUrl"),
+                        document.getString("number"), Channel.Origin.valueOf(document.getString("origin"))))
+                .toList();
+        List<Programme> programmes = mergedProgrammes().find().into(new ArrayList<>()).stream()
+                .map(document -> new Programme(new ChannelId(document.getString("channelId")), slot(document),
+                        new SourceId(document.getString("winningSource")), document.getString("title"),
+                        document.getString("description"), document.getString("category"),
+                        document.getString("episodeNumber"), document.getString("iconUrl")))
+                .sorted(Comparator.comparing((Programme programme) -> programme.channelId().value())
+                        .thenComparing(programme -> programme.slot().start()))
+                .toList();
+        return Optional.of(new StoredGuide(new Guide(channels, programmes),
+                instant(marker.get("materializedAt"))));
+    }
+
+    @Override
+    public void saveMergedGuide(Guide guide, Instant materializedAt) {
+        ensureIndexes();
+        collection(MERGED_CHANNELS).deleteMany(new Document());
+        mergedProgrammes().deleteMany(new Document());
+        List<Document> channels = guide.channels().stream()
+                .map(channel -> new Document("_id", channel.id().value())
+                        .append("displayName", channel.displayName())
+                        .append("iconUrl", channel.iconUrl())
+                        .append("number", channel.number())
+                        .append("origin", channel.origin().name()))
+                .toList();
+        List<Document> programmes = guide.programmes().stream()
+                .map(programme -> new Document("channelId", programme.channelId().value())
+                        .append("winningSource", programme.winningSource().value())
+                        .append("start", time(programme.slot().start()))
+                        .append("stop", time(programme.slot().stop()))
+                        .append("title", programme.title())
+                        .append("description", programme.description())
+                        .append("category", programme.category())
+                        .append("episodeNumber", programme.episodeNumber())
+                        .append("iconUrl", programme.iconUrl()))
+                .toList();
+        if (!channels.isEmpty()) {
+            collection(MERGED_CHANNELS).insertMany(channels);
+        }
+        if (!programmes.isEmpty()) {
+            mergedProgrammes().insertMany(programmes);
+        }
+        Document marker = new Document("_id", GUIDE_MARKER_ID).append("materializedAt", date(materializedAt));
+        collection(GUIDE_MARKERS).replaceOne(eq("_id", GUIDE_MARKER_ID), marker, new ReplaceOptions().upsert(true));
+    }
+
+    @Override
+    public List<Channel> registry() {
+        ensureIndexes();
+        return collection(CANONICAL_CHANNELS).find().into(new ArrayList<>()).stream()
+                .map(document -> new Channel(new ChannelId(document.getString("_id")),
+                        document.getString("displayName"), document.getString("iconUrl"),
+                        document.getString("number"), Channel.Origin.valueOf(document.getString("origin"))))
+                .toList();
+    }
+
+    @Override
+    public void saveRegistry(List<Channel> channels) {
+        ensureIndexes();
+        collection(CANONICAL_CHANNELS).deleteMany(new Document());
+        List<Document> rows = channels.stream()
+                .map(channel -> new Document("_id", channel.id().value())
+                        .append("displayName", channel.displayName())
+                        .append("iconUrl", channel.iconUrl())
+                        .append("number", channel.number())
+                        .append("origin", channel.origin().name()))
+                .toList();
+        if (!rows.isEmpty()) {
+            collection(CANONICAL_CHANNELS).insertMany(rows);
+        }
+    }
+
+    @Override
+    public List<SourceHealth> health() {
+        ensureIndexes();
+        return collection(SOURCE_HEALTH).find().into(new ArrayList<>()).stream()
+                .map(document -> new SourceHealth(new SourceId(document.getString("_id")),
+                        document.getString("name"), SourceHealth.State.valueOf(document.getString("state")),
+                        document.getInteger("programmeCount", 0), document.getString("error")))
+                .toList();
+    }
+
+    @Override
+    public void saveHealth(SourceHealth health) {
+        ensureIndexes();
+        Document document = new Document("_id", health.source().value())
+                .append("name", health.name())
+                .append("state", health.state().name())
+                .append("programmeCount", health.programmeCount())
+                .append("error", health.error());
+        collection(SOURCE_HEALTH).replaceOne(eq("_id", document.get("_id")), document,
+                new ReplaceOptions().upsert(true));
+    }
+
+    @Override
+    public void prune(Instant before) {
+        ensureIndexes();
+        programmes().deleteMany(lt("stop", date(before)));
+    }
+
+    private static String canonicalId(Map<SourceChannelRef, ChannelId> canonicalIds, SourceId source,
+            String sourceChannelId) {
+        ChannelId canonical = canonicalIds.get(new SourceChannelRef(source, sourceChannelId));
+        return canonical == null ? sourceChannelId : canonical.value();
+    }
+
+    private static Date date(Instant instant) {
+        return Date.from(instant);
+    }
+
+    /** Programme slots carry an offset; MongoDB stores an instant, so UTC is the round-trip format. */
+    private static Date time(OffsetDateTime time) {
+        return Date.from(time.toInstant());
+    }
+
+    private static OffsetDateTime time(Object value) {
+        return ((Date) value).toInstant().atOffset(ZoneOffset.UTC);
+    }
+
+    private static Instant instant(Object value) {
+        return ((Date) value).toInstant();
+    }
+
+    private static Slot slot(Document document) {
+        return new Slot(time(document.get("start")), time(document.get("stop")));
+    }
+
+    static IndexOptions unique() {
+        return new IndexOptions().unique(true);
+    }
+}

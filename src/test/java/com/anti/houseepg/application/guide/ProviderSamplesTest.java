@@ -14,7 +14,8 @@ import com.anti.houseepg.domain.guide.model.SourceId;
 import com.anti.houseepg.domain.guide.policy.ChannelMatch;
 import com.anti.houseepg.domain.guide.policy.MatchState;
 import com.anti.houseepg.infrastructure.epg.XmltvReader;
-import com.anti.houseepg.infrastructure.match.InMemoryChannelMatchStore;
+import com.anti.houseepg.support.InMemoryChannelMatchStore;
+import com.anti.houseepg.support.InMemoryGuideStore;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -42,6 +43,7 @@ class ProviderSamplesTest {
     private static final SourceId PROVIDER_B = new SourceId("provider-b");
 
     private final InMemoryChannelMatchStore matchStore = new InMemoryChannelMatchStore();
+    private final InMemoryGuideStore guideStore = new InMemoryGuideStore();
 
     private static final Map<String, String> FIXTURES = Map.of(
             "provider-a", "/fixtures/provider-a.xml",
@@ -94,7 +96,8 @@ class ProviderSamplesTest {
                         EpgSource.of("provider-a", "Provider A", "fixture:provider-a", Credentials.none()),
                         EpgSource.of("provider-b", "Provider B", "fixture:provider-b", Credentials.none())),
                 Optional.empty());
-        return new RefreshGuide(settings, ProviderSamplesTest::readFixture, noChannelAuthority(), matchStore);
+        return new RefreshGuide(settings, ProviderSamplesTest::readFixture, noChannelAuthority(), matchStore,
+                guideStore);
     }
 
     private static ChannelAuthorityGateway noChannelAuthority() {
