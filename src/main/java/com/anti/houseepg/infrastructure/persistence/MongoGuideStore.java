@@ -101,8 +101,10 @@ public class MongoGuideStore implements GuideStore {
         if (document == null) {
             return Optional.empty();
         }
-        return Optional.of(new RawSnapshot(source, instant(document.get("fetchedAt")),
-                document.getString("content")));
+        String content = document.getString("content");
+        Long sizeBytes = document.getLong("sizeBytes");
+        return Optional.of(new RawSnapshot(source, instant(document.get("fetchedAt")), content,
+                sizeBytes == null ? (content == null ? 0 : content.length()) : sizeBytes));
     }
 
     @Override
@@ -110,7 +112,8 @@ public class MongoGuideStore implements GuideStore {
         ensureIndexes();
         Document document = new Document("_id", snapshot.source().value())
                 .append("fetchedAt", date(snapshot.fetchedAt()))
-                .append("content", snapshot.content());
+                .append("content", snapshot.content())
+                .append("sizeBytes", snapshot.sizeBytes());
         collection(RAW_SNAPSHOTS).replaceOne(eq("_id", document.get("_id")), document,
                 new ReplaceOptions().upsert(true));
     }

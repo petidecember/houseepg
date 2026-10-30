@@ -166,7 +166,7 @@ class MongoPersistenceIntegrationTest {
         String payload = document.programmes().stream()
                 .map(programme -> "<programme><title>" + programme.title() + "</title></programme>")
                 .reduce("<tv>", String::concat) + "</tv>";
-        guideStore.saveRawSnapshot(new RawSnapshot(source.id(), Instant.now(), payload));
+        guideStore.saveRawSnapshot(RawSnapshot.of(source.id(), Instant.now(), payload));
         return document;
     }
 
