@@ -19,6 +19,9 @@ import com.anti.houseepg.support.InMemoryGuideStore;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -48,6 +51,14 @@ class ProviderSamplesTest {
     private static final Map<String, String> FIXTURES = Map.of(
             "provider-a", "/fixtures/provider-a.xml",
             "provider-b", "/fixtures/provider-b.xml");
+
+    /**
+     * The fixtures span 2026-10-25T16:08Z to 2026-10-31T15:30Z, and a refresh prunes every programme that
+     * ended before {@code now - retention} (7 days). Driving the refresh with a fixed instant inside that
+     * window keeps the golden numbers below meaningful on any date; calling {@code refresh()} would use
+     * the wall clock and quietly prune the fixtures as time passes.
+     */
+    private static final Instant FIXTURE_NOW = Instant.parse("2026-10-30T00:00:00Z");
 
     @Test
     void mergesTheTwoProviderSamplesAtScale() {
@@ -97,7 +108,7 @@ class ProviderSamplesTest {
                         EpgSource.of("provider-b", "Provider B", "fixture:provider-b", Credentials.none())),
                 Optional.empty());
         return new RefreshGuide(settings, ProviderSamplesTest::readFixture, noChannelAuthority(), matchStore,
-                guideStore);
+                guideStore, Clock.fixed(FIXTURE_NOW, ZoneOffset.UTC));
     }
 
     private static ChannelAuthorityGateway noChannelAuthority() {

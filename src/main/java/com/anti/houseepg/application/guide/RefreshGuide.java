@@ -16,6 +16,7 @@ import com.anti.houseepg.domain.guide.policy.ChannelMatch;
 import com.anti.houseepg.domain.guide.policy.ChannelMatching;
 import com.anti.houseepg.domain.guide.policy.PriorityMerge;
 import com.anti.houseepg.domain.guide.policy.SourceChannelRef;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -44,15 +45,28 @@ public class RefreshGuide {
     private final ChannelAuthorityGateway channelAuthority;
     private final ChannelMatchStore matchStore;
     private final GuideStore store;
+    private final Clock clock;
     private final Map<SourceId, SourceEpg> lastGood = new LinkedHashMap<>();
 
     public RefreshGuide(GuideSettings settings, EpgSourceGateway epgSources,
             ChannelAuthorityGateway channelAuthority, ChannelMatchStore matchStore, GuideStore store) {
+        this(settings, epgSources, channelAuthority, matchStore, store, Clock.systemUTC());
+    }
+
+    /**
+     * The clock is a parameter so a test can pin it: retention prunes everything that ended before
+     * {@code now - retention}, so a test that reads the wall clock starts failing once the fixtures age
+     * out of the window.
+     */
+    public RefreshGuide(GuideSettings settings, EpgSourceGateway epgSources,
+            ChannelAuthorityGateway channelAuthority, ChannelMatchStore matchStore, GuideStore store,
+            Clock clock) {
         this.settings = settings;
         this.epgSources = epgSources;
         this.channelAuthority = channelAuthority;
         this.matchStore = matchStore;
         this.store = store;
+        this.clock = clock;
     }
 
     /** The configured sources, so the manual-refresh endpoint can recognise a path variable. */
@@ -80,7 +94,7 @@ public class RefreshGuide {
     }
 
     private RefreshResult refreshAll(Collection<SourceId> forced) {
-        Instant now = Instant.now();
+        Instant now = clock.instant();
         Set<SourceId> force = Set.copyOf(forced);
 
         List<SourceEpg> documents = new ArrayList<>();
