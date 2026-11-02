@@ -21,4 +21,10 @@ public interface ChannelMatchStore {
 
     /** Records an explicit human decision (confirm or correct). */
     void decide(ChannelMatch decision);
+
+    /**
+     * Records many explicit decisions as one write, so a bulk accept costs one round trip and one
+     * re-merge instead of one per row.
+     */
+    void decideAll(List<ChannelMatch> decisions);
 }

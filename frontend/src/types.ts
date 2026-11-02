@@ -39,6 +39,8 @@ export type Channel = {
   name: string;
   number: string | null;
   origin: 'PLAYLIST' | 'PRIMARY_SOURCE' | 'PASS_THROUGH';
+  iconUrl: string | null;
+  qualityTag: string | null;
 };
 
 export type Match = {
@@ -48,6 +50,8 @@ export type Match = {
   confidence: string;
   state: 'AUTO' | 'CONFIRMED' | 'CORRECTED' | 'UNMATCHED';
   curated: boolean;
+  sourceChannelName: string | null;
+  sourceIconUrl: string | null;
 };
 
 export type Programme = {
@@ -70,4 +74,36 @@ export type Timeline = {
 export type Registry = {
   channels: Channel[];
   matches: Match[];
+};
+
+export type Candidate = {
+  id: string;
+  name: string;
+  iconUrl: string | null;
+  qualityTag: string | null;
+  confidence: string;
+  score: number;
+};
+
+export type ReviewRow = {
+  source: string;
+  sourceChannelId: string;
+  sourceChannelName: string | null;
+  sourceIconUrl: string | null;
+  canonicalId: string;
+  confidence: string;
+  state: 'AUTO' | 'CONFIRMED' | 'CORRECTED' | 'UNMATCHED';
+  curated: boolean;
+  candidates: Candidate[];
+};
+
+export type Review = {
+  rows: ReviewRow[];
+  channels: Channel[];
+};
+
+export type BulkAcceptResult = {
+  count: number;
+  dryRun: boolean;
+  rows: { source: string; sourceChannelId: string; canonicalId: string }[];
 };

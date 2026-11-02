@@ -17,7 +17,11 @@ public enum MatchConfidence {
 
     /** Only the normalized display name matched. */
     NORMALIZED_NAME(0.6),
-
+    /**
+     * A name-similarity suggestion from the review ranking. {@link ChannelMatching#match} never produces
+     * it: it exists so a suggestion can be shown, and so a later promotion has a name to record.
+     */
+    FUZZY_NAME(0.5),
     /** No evidence: the channel is a pass-through. */
     NONE(0.0);
 

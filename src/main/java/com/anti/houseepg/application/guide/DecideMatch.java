@@ -33,6 +33,18 @@ public class DecideMatch {
      * @throws IllegalArgumentException when the registry has no such canonical channel, or the ref is
      *     incomplete; a decision always points at a channel the feed can actually emit
      */
+    /**
+     * Records a decision whose state is derived rather than chosen: pointing the row at the channel it
+     * already points at is a confirmation, pointing it somewhere else is a correction. The user should
+     * not have to answer a question that has no consequence.
+     */
+    public ChannelMatch decide(SourceChannelRef source, ChannelId canonicalId) {
+        boolean sameAsCurrent = matchStore.decisions().stream()
+                .filter(match -> match.source().equals(source))
+                .anyMatch(match -> match.canonicalId().equals(canonicalId));
+        return decide(source, canonicalId, !sameAsCurrent);
+    }
+
     public ChannelMatch decide(SourceChannelRef source, ChannelId canonicalId, boolean corrected) {
         boolean known = guideStore.registry().stream().anyMatch(channel -> channel.id().equals(canonicalId));
         if (!known) {

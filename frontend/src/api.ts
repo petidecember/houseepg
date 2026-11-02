@@ -1,9 +1,11 @@
 import type {
+  BulkAcceptResult,
   Health,
   Match,
   PrioritySource,
   Registry,
   ReloadResult,
+  Review,
   ReorderResult,
   ReseedPreview,
   Timeline,
@@ -60,7 +62,11 @@ export const api = {
     request<Health>(`/api/sources/${encodeURIComponent(id)}/refresh`, { method: 'POST' }),
 
   registry: () => request<Registry>('/api/channels'),
+  review: (fuzzy: boolean, filter: string) =>
+    request<Review>(`/api/review?fuzzy=${fuzzy}&filter=${encodeURIComponent(filter)}`),
+  bulkAccept: (dryRun: boolean) =>
+    request<BulkAcceptResult>(`/api/matches/bulk-accept?dryRun=${dryRun}`, { method: 'POST' }),
   preview: (id: string) => request<Timeline>(`/api/preview/${encodeURIComponent(id)}`),
-  decide: (body: { source: string; sourceChannelId: string; canonicalId: string; decision: 'confirmed' | 'corrected' }) =>
+  decide: (body: { source: string; sourceChannelId: string; canonicalId: string }) =>
     request<Match>('/api/matches', { method: 'PUT', body: JSON.stringify(body) }),
 };

@@ -13,7 +13,9 @@ import com.anti.houseepg.domain.guide.policy.SourceChannelRef;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Indexes;
+import com.mongodb.client.model.ReplaceOneModel;
 import com.mongodb.client.model.ReplaceOptions;
+import com.mongodb.client.model.WriteModel;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -83,6 +85,22 @@ public class MongoChannelMatchStore implements ChannelMatchStore {
             throw new IllegalArgumentException("a decision must be confirmed or corrected, not " + decision.state());
         }
         write(decision);
+    }
+
+    @Override
+    public void decideAll(List<ChannelMatch> decisions) {
+        if (decisions.isEmpty()) {
+            return;
+        }
+        List<WriteModel<Document>> writes = new ArrayList<>();
+        for (ChannelMatch decision : decisions) {
+            if (!decision.isCurated()) {
+                throw new IllegalArgumentException(
+                        "a decision must be confirmed or corrected, not " + decision.state());
+            }
+            writes.add(new ReplaceOneModel<>(key(decision), document(decision), new ReplaceOptions().upsert(true)));
+        }
+        matches().bulkWrite(writes);
     }
 
     private void write(ChannelMatch match) {

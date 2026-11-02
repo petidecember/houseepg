@@ -6,7 +6,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.anti.houseepg.application.guide.DecideMatch;
+import com.anti.houseepg.application.guide.BulkAcceptMatches;
 import com.anti.houseepg.application.guide.InspectGuide;
+import com.anti.houseepg.application.guide.ReviewMatches;
 import com.anti.houseepg.domain.guide.model.Channel;
 import com.anti.houseepg.domain.guide.model.ChannelId;
 import com.anti.houseepg.domain.guide.model.Guide;
@@ -106,6 +108,9 @@ class InspectionControllerTest {
         InspectGuide inspect = new InspectGuide(store, matches);
         DecideMatch decide = new DecideMatch(store, matches, () -> {
         });
-        return MockMvcBuilders.standaloneSetup(new InspectionController(inspect, decide)).build();
+        return MockMvcBuilders
+                .standaloneSetup(new InspectionController(inspect, decide, new ReviewMatches(inspect),
+                        new BulkAcceptMatches(matches, () -> { })))
+                .build();
     }
 }

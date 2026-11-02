@@ -7,9 +7,11 @@ import com.anti.houseepg.application.config.ReseedRegistry;
 import com.anti.houseepg.application.config.port.ConfigDumpWriter;
 import com.anti.houseepg.application.config.port.DeclarationReader;
 import com.anti.houseepg.application.config.port.SourceOrderStore;
+import com.anti.houseepg.application.guide.BulkAcceptMatches;
 import com.anti.houseepg.application.guide.DecideMatch;
 import com.anti.houseepg.application.guide.GuideSettings;
 import com.anti.houseepg.application.guide.InspectGuide;
+import com.anti.houseepg.application.guide.ReviewMatches;
 import com.anti.houseepg.application.guide.RefreshGuide;
 import com.anti.houseepg.application.guide.ServeGuide;
 import com.anti.houseepg.application.guide.port.ChannelAuthorityGateway;
@@ -50,6 +52,16 @@ public class HouseEpgConfiguration {
     @Bean
     ServeGuide serveGuide(RefreshGuide refreshGuide, GuideStore guideStore, ChannelMatchStore matchStore) {
         return new ServeGuide(refreshGuide, guideStore, matchStore);
+    }
+
+    @Bean
+    BulkAcceptMatches bulkAcceptMatches(ChannelMatchStore matchStore, RefreshGuide refreshGuide) {
+        return new BulkAcceptMatches(matchStore, () -> refreshGuide.refreshDue(Instant.now()));
+    }
+
+    @Bean
+    ReviewMatches reviewMatches(InspectGuide inspectGuide) {
+        return new ReviewMatches(inspectGuide);
     }
 
     @Bean

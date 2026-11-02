@@ -5,11 +5,18 @@ import com.anti.houseepg.application.guide.port.GuideStore;
 import com.anti.houseepg.domain.guide.model.Channel;
 import com.anti.houseepg.domain.guide.model.ChannelId;
 import com.anti.houseepg.domain.guide.model.Programme;
+import com.anti.houseepg.domain.guide.model.SourceChannel;
+import com.anti.houseepg.domain.guide.model.SourceId;
 import com.anti.houseepg.domain.guide.policy.ChannelMatch;
+import com.anti.houseepg.domain.guide.policy.SourceChannelRef;
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Use case: let a human look at what the merge produced — the registry with the matches behind it, and
@@ -25,9 +32,38 @@ public class InspectGuide {
         this.matchStore = matchStore;
     }
 
-    /** The canonical channels the feed can emit, with every match row known about them. */
+    /** The canonical channels the feed can emit, with every match row and the source channel behind it. */
     public Registry registry() {
-        return new Registry(store.registry(), matchStore.decisions());
+        List<ChannelMatch> matches = matchStore.decisions();
+        return new Registry(store.registry(), matches, sourceChannels(matches));
+    }
+
+    /** The source channel behind one match row, when its normalized document is still stored. */
+    public Optional<SourceChannel> sourceChannel(SourceChannelRef ref) {
+        return store.normalized(ref.source()).flatMap(document -> document.channels().stream()
+                .filter(channel -> channel.id().equals(ref.channelId()))
+                .findFirst());
+    }
+
+    /**
+     * The source channels the match rows point at, so a review row can show the source's own name and
+     * icon next to the canonical channel it was attached to. A source whose normalized document is gone
+     * contributes nothing; the row then falls back to the id it already carries.
+     */
+    private Map<SourceChannelRef, SourceChannel> sourceChannels(List<ChannelMatch> matches) {
+        Map<SourceChannelRef, SourceChannel> found = new LinkedHashMap<>();
+        Set<SourceId> sources = new LinkedHashSet<>();
+        for (ChannelMatch match : matches) {
+            sources.add(match.source().source());
+        }
+        for (SourceId source : sources) {
+            store.normalized(source).ifPresent(document -> {
+                for (SourceChannel channel : document.channels()) {
+                    found.put(new SourceChannelRef(source, channel.id()), channel);
+                }
+            });
+        }
+        return found;
     }
 
     /** One canonical channel and the programmes the merge gave it, in start order. */
@@ -44,12 +80,15 @@ public class InspectGuide {
     /**
      * @param channels the registry, which is the channel authority's answer, not the merge's
      * @param matches one row per source channel, curated rows included
+     * @param sourceChannels the source channel each match row points at, for the review comparison
      */
-    public record Registry(List<Channel> channels, List<ChannelMatch> matches) {
+    public record Registry(List<Channel> channels, List<ChannelMatch> matches,
+            Map<SourceChannelRef, SourceChannel> sourceChannels) {
 
         public Registry {
             channels = channels == null ? List.of() : List.copyOf(channels);
             matches = matches == null ? List.of() : List.copyOf(matches);
+            sourceChannels = sourceChannels == null ? Map.of() : Map.copyOf(sourceChannels);
         }
     }
 

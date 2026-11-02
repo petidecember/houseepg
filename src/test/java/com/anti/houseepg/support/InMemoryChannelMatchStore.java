@@ -32,6 +32,13 @@ public class InMemoryChannelMatchStore implements ChannelMatchStore {
         matches.put(decision.source(), decision);
     }
 
+    @Override
+    public void decideAll(List<ChannelMatch> decisions) {
+        for (ChannelMatch decision : decisions) {
+            decide(decision);
+        }
+    }
+
     private static ChannelMatch keepCurated(ChannelMatch existing, ChannelMatch incoming) {
         return existing != null && existing.isCurated() ? existing : incoming;
     }
