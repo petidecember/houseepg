@@ -1,44 +1,61 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { useLoader } from '../useLoader';
+import {
+  consume,
+  excludedKeys,
+  load,
+  picksOf,
+  reconcile,
+  rowKey,
+  save,
+  withControls,
+  withExcluded,
+  withPick,
+} from '../reviewState';
+import type { ReviewControls, ReviewFilter, ReviewWork } from '../reviewState';
 import type { Decision, ReviewRow } from '../types';
-
-const DEBUG_KEY = 'houseepg.review.debug';
-
-type Filter = 'needs-decision' | 'all' | 'curated' | 'unmatched';
 
 /**
  * The match review: one row per source channel that still needs a decision, the source's own logo next
  * to the channel it is attached to, and one action per row. The state is derived by the server — the
  * same target is a confirmation, a different one is a correction — so the user is never asked a question
  * that has no consequence.
+ *
+ * What the user has done so far lives in the browser (see `reviewState`): the controls, the picks and
+ * the unticked rows survive a reload, and a write consumes only the rows it wrote, so a save is not a
+ * reset of everything else.
  */
 export function ReviewPanel() {
-  const [filter, setFilter] = useState<Filter>('needs-decision');
-  const [fuzzy, setFuzzy] = useState(false);
-  const [debug, setDebug] = useState(() => localStorage.getItem(DEBUG_KEY) === '1');
-  const [query, setQuery] = useState('');
-  const [target, setTarget] = useState<Record<string, string>>({});
+  const [work, setWork] = useState<ReviewWork>(() => load(localStorage));
   const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'bad' } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [preview, setPreview] = useState<number | null>(null);
-  const [excluded, setExcluded] = useState<Set<string>>(new Set());
 
-  const load = useCallback(() => api.review(fuzzy, filter), [fuzzy, filter]);
-  const { data, error, loading, reload } = useLoader(load);
+  const { filter, fuzzy, debug, query } = work.controls;
+  const fetchReview = useCallback(() => api.review(fuzzy, filter), [fuzzy, filter]);
+  const { data, error, loading, reload } = useLoader(fetchReview);
 
+  // The panel's state is the browser's copy of it: one write-through, no other place to keep it.
   useEffect(() => {
-    localStorage.setItem(DEBUG_KEY, debug ? '1' : '0');
-  }, [debug]);
+    save(localStorage, work);
+  }, [work]);
 
-
-  // A fresh list starts fully accepted: the user unchecks what looks wrong, not the reverse.
+  // Work only means something while the payload still has the row and the channel it names. What
+  // survives is exactly what the user left behind, unticked rows included.
   useEffect(() => {
-    setExcluded(new Set());
+    if (data) {
+      setWork((current) => reconcile(current, data));
+    }
   }, [data]);
+
   const channels = data?.channels ?? [];
   const rows = data?.rows ?? [];
   const byId = useMemo(() => new Map(channels.map((channel) => [channel.id, channel])), [channels]);
+  const target = useMemo(() => picksOf(work), [work]);
+  const excluded = useMemo(() => excludedKeys(work), [work]);
+
+  const update = (patch: Partial<ReviewControls>) => setWork((current) => withControls(current, patch));
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -56,7 +73,7 @@ export function ReviewPanel() {
 
   /** The value the dropdown opens on: the user's pick, else the best candidate, else the current match. */
   const chosen = (row: ReviewRow): string => {
-    const picked = target[key(row)];
+    const picked = target[rowKey(row)];
     if (picked) {
       return picked;
     }
@@ -72,10 +89,10 @@ export function ReviewPanel() {
    * third fallback — the row's current match id — is display only: it can show a channel nobody chose, and
    * writing it would confirm a match the user never saw.
    */
-  const writable = (row: ReviewRow): boolean => Boolean(target[key(row)]) || row.candidates.length > 0;
+  const writable = (row: ReviewRow): boolean => Boolean(target[rowKey(row)]) || row.candidates.length > 0;
 
   /** What one accept writes: the rows on screen, included, writable and not already decided. */
-  const accepted = visible.filter((row) => writable(row) && !row.curated && !excluded.has(key(row)));
+  const accepted = visible.filter((row) => writable(row) && !row.curated && !excluded.has(rowKey(row)));
 
   const decisions = (rows: ReviewRow[]): Decision[] =>
     rows.map((row) => ({
@@ -84,12 +101,12 @@ export function ReviewPanel() {
       canonicalId: chosen(row),
     }));
 
-  const save = async (row: ReviewRow) => {
+  const saveRow = async (row: ReviewRow) => {
     const canonicalId = chosen(row);
     if (canonicalId === '') {
       return;
     }
-    setBusy(key(row));
+    setBusy(rowKey(row));
     setNotice(null);
     try {
       await api.decide({ source: row.source, sourceChannelId: row.sourceChannelId, canonicalId });
@@ -97,6 +114,8 @@ export function ReviewPanel() {
         text: `${row.sourceChannelName ?? row.sourceChannelId} → ${byId.get(canonicalId)?.name ?? canonicalId}`,
         tone: 'ok',
       });
+      // The row is written, so its entry is done; every other row keeps the state the user left it in.
+      setWork((current) => consume(current, [rowKey(row)]));
       await reload();
     } catch (e) {
       setNotice({ text: e instanceof Error ? e.message : String(e), tone: 'bad' });
@@ -117,10 +136,12 @@ export function ReviewPanel() {
 
   const applyAccept = async () => {
     setBusy('accept');
+    const written = accepted.map(rowKey);
     try {
       const result = await api.accept(decisions(accepted), false);
       setPreview(null);
       setNotice({ text: `Curated ${result.count} row(s).`, tone: 'ok' });
+      setWork((current) => consume(current, written));
       await reload();
     } catch (e) {
       setNotice({ text: e instanceof Error ? e.message : String(e), tone: 'bad' });
@@ -149,7 +170,7 @@ export function ReviewPanel() {
       <div className="actions">
         <label>
           Show{' '}
-          <select value={filter} onChange={(event) => setFilter(event.target.value as Filter)}>
+          <select value={filter} onChange={(event) => update({ filter: event.target.value as ReviewFilter })}>
             <option value="needs-decision">Needs a decision</option>
             <option value="unmatched">Unmatched</option>
             <option value="curated">Curated</option>
@@ -157,17 +178,22 @@ export function ReviewPanel() {
           </select>
         </label>
         <label>
-          <input type="checkbox" checked={fuzzy} onChange={(event) => setFuzzy(event.target.checked)} /> Suggest
-          similar names
+          <input
+            type="checkbox"
+            checked={fuzzy}
+            onChange={(event) => update({ fuzzy: event.target.checked })}
+          />{' '}
+          Suggest similar names
         </label>
         <label>
-          <input type="checkbox" checked={debug} onChange={(event) => setDebug(event.target.checked)} /> Debug
+          <input type="checkbox" checked={debug} onChange={(event) => update({ debug: event.target.checked })} />{' '}
+          Debug
         </label>
         <input
           type="search"
           placeholder="Filter by channel name, id or source"
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => update({ query: event.target.value })}
         />
         <span className="muted">
           {visible.length} row(s), {channels.length} registry channels
@@ -203,7 +229,7 @@ export function ReviewPanel() {
         </thead>
         <tbody>
           {visible.map((row) => {
-            const id = key(row);
+            const id = rowKey(row);
             const selected = byId.get(chosen(row));
             return (
               <tr key={id}>
@@ -213,15 +239,7 @@ export function ReviewPanel() {
                     aria-label={`Include ${row.sourceChannelName ?? row.sourceChannelId}`}
                     checked={!excluded.has(id)}
                     disabled={!writable(row) || row.curated || busy !== null}
-                    onChange={(event) => {
-                      const next = new Set(excluded);
-                      if (event.target.checked) {
-                        next.delete(id);
-                      } else {
-                        next.add(id);
-                      }
-                      setExcluded(next);
-                    }}
+                    onChange={(event) => setWork((current) => withExcluded(current, id, !event.target.checked))}
                   />
                 </td>
                 <td className="source-cell">
@@ -234,7 +252,7 @@ export function ReviewPanel() {
                 <td className="decide">
                   <select
                     value={chosen(row)}
-                    onChange={(event) => setTarget({ ...target, [id]: event.target.value })}
+                    onChange={(event) => setWork((current) => withPick(current, id, event.target.value))}
                     disabled={busy !== null}
                   >
                     {chosen(row) === '' && <option value="">Choose a channel…</option>}
@@ -258,7 +276,7 @@ export function ReviewPanel() {
                   <ChannelLogo url={selected?.iconUrl ?? null} name={selected?.name ?? '—'} />
                   <button
                     type="button"
-                    onClick={() => void save(row)}
+                    onClick={() => void saveRow(row)}
                     disabled={busy !== null || chosen(row) === ''}
                   >
                     Save decision
@@ -316,6 +334,3 @@ function optionLabel(channel: { name: string; qualityTag: string | null }): stri
   return `${channel.name} · ${tag}`;
 }
 
-function key(row: ReviewRow): string {
-  return `${row.source}|${row.sourceChannelId}`;
-}
