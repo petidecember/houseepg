@@ -188,6 +188,92 @@ timeline**; holes are expected and are the DVR client's problem to render as "no
 - Ids **can** change on a **deliberate re-seed** — changing which source sits at priority #1 —
   because "primary" is positional. The UI must warn that DVR mappings may need redoing. See ADR-0002.
 
+### 6.5 One refresh, in pictures
+
+§6.1–§6.4 carry the rules; this section is only their shape. Everything below happens in one
+`RefreshGuide.refreshAll` pass.
+
+**Stages.**
+
+```text
+per source: fetch, or reuse the last good stored data ──▶ SourceHealth + SourceEpg
+                            │
+                            ▼  drop programmes that ended before the cutoff (§8)
+      registry(documents) ──▶ List<Channel>   playlist  >  stored  >  seed from source #1
+                            │                 (never a second source, ADR-0002)
+                            ▼
+      ChannelMatching.match(registry, documents, decisions)
+                            │ ──▶ canonicalIds: (source, sourceChannel) → ChannelId
+                            │ ──▶ List<ChannelMatch>, state AUTO or UNMATCHED
+                            ▼
+      saveAuto(matches)                       a curated row is never rewritten
+                            │
+                            ▼
+      PriorityMerge.merge(channels, documents, canonicalIds, priority)
+                            ▼
+      saveMergedGuide(guide) ──▶ GET /xmltv
+```
+
+**The ladder, per source channel.** Strongest evidence first, first hit decides.
+
+```text
+  ┌─ a recorded decision ──────────────────────────────────────────┐
+  │ CONFIRMED or CORRECTED, and its canonical channel still exists │──▶ reused
+  └────────────────────────────────────────────────────────────────┘
+        │ no decision, or a stale one: the canonical channel is gone
+        ▼
+  byId[channel.id]            hit ──▶ EXACT_ID          1.0
+  byDisplayName[channel.name] hit ──▶ EXACT_NAME        0.9
+  byKey[key(channel.id)]      hit ──▶ NORMALIZED_ID     0.8
+  byKey[key(channel.name)]    hit ──▶ NORMALIZED_NAME   0.6
+  nothing                      ───▶ UNMATCHED           0.0
+                                     + a PASS_THROUGH channel under the source's own id
+```
+
+`byKey` indexes every registry channel **twice** — under the key of its id and under the key of its
+display name — so a source channel id can land on a registry *name*, and that is still
+`NORMALIZED_ID`.
+
+**One channel, three spellings.** The playlist is the authority, so it decides whether HD and SD are
+separate channels; `AnimalPlanet.HD`, `AnimalPlanet.SD` and `AnimalPlanet.hu` all normalize to
+`animalplanet`, which is the collision `QualityTag` exists to break.
+
+```text
+source: id "animalplanet.hd", display name "HU - Animal Planet HD"
+  1. recorded decision ........... none
+  2. byId["animalplanet.hd"] ..... miss   (the registry id is "AnimalPlanet.HD": case differs)
+  3. byDisplayName[...] .......... miss   (not character for character)
+  4. byKey["animalplanet"] ....... HIT    key of the id, tag stripped
+                                          3 candidates, wanted tag "hd"
+                                          → AnimalPlanet.HD
+                                          ──▶ NORMALIZED_ID 0.8
+
+source: id "50505", display name "HU - Animal Planet SD"
+  4. byKey["50505"] .............. miss
+  5. byKey["animalplanet"] ....... HIT    key of the display name, prefix and tag stripped
+                                          wanted tag "sd" → AnimalPlanet.SD
+                                          ──▶ NORMALIZED_NAME 0.6
+```
+
+The preferred candidate is the one advertising the source channel's own `QualityTag`, read from its
+id and then from its display name; registry order decides the rest. The review list orders candidates
+the same way, so the automatic answer and the suggestion shown beside it cannot disagree.
+
+**Suggestions are a separate door.** `ChannelMatching.candidates` — the best three, fuzzy only when
+asked for — is an entry point `match` never calls. A suggestion becomes a match only through an
+explicit decision, which is what keeps emitted ids still (ADR-0002).
+
+**Then the slots.** Matching decides which canonical channel a programme belongs to; §6.3 decides
+which programme survives.
+
+```text
+canonical channel ─────────────── time ───────────────▶
+  source #1   [ A ][ B ][ C ]      claims A, B and C
+  source #2   [ a ][ b ][  D  ]    a and b overlap ──▶ dropped whole
+  source #3   [       E ]          E overlaps B    ──▶ dropped whole
+  emitted     [ A ][ B ][ C ]
+```
+
 ## 7. Persistence
 
 Three layers in MongoDB. The database is an **intermediate representation of the merge**: everything
