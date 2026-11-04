@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { useLoader } from '../useLoader';
+import { UNMATCHED, accepted as acceptedRows, chosen as chosenFor, writable as isWritable } from '../rowRules';
 import {
   consume,
   excludedKeys,
@@ -71,28 +72,18 @@ export function ReviewPanel() {
     );
   }, [rows, query]);
 
-  /** The value the dropdown opens on: the user's pick, else the best candidate, else the current match. */
-  const chosen = (row: ReviewRow): string => {
-    const picked = target[rowKey(row)];
-    if (picked) {
-      return picked;
-    }
-    const best = row.candidates[0]?.id;
-    if (best) {
-      return best;
-    }
-    return byId.has(row.canonicalId) ? row.canonicalId : '';
-  };
+  /** What the row is attached to; the rule lives in `rowRules` so it can be tested without rendering. */
+  const chosen = (row: ReviewRow): string => chosenFor(row, target, byId);
 
   /**
-   * A row can only be written when the user picked a channel or the matcher offered one. The dropdown's
-   * third fallback — the row's current match id — is display only: it can show a channel nobody chose, and
-   * writing it would confirm a match the user never saw.
+   * Whether a write is possible at all: a pick the user made, or a candidate the matcher offered. The
+   * display fallback — the row's current match id — is not a choice, so it never makes a row writable,
+   * and neither does the unmatched sentinel.
    */
-  const writable = (row: ReviewRow): boolean => Boolean(target[rowKey(row)]) || row.candidates.length > 0;
+  const writable = (row: ReviewRow): boolean => isWritable(row, target);
 
-  /** What one accept writes: the rows on screen, included, writable and not already decided. */
-  const accepted = visible.filter((row) => writable(row) && !row.curated && !excluded.has(rowKey(row)));
+  /** What one accept writes: the rows on screen, writable, not already decided and not unticked. */
+  const accepted = acceptedRows(visible, target, excluded);
 
   const decisions = (rows: ReviewRow[]): Decision[] =>
     rows.map((row) => ({
@@ -103,7 +94,7 @@ export function ReviewPanel() {
 
   const saveRow = async (row: ReviewRow) => {
     const canonicalId = chosen(row);
-    if (canonicalId === '') {
+    if (canonicalId === UNMATCHED) {
       return;
     }
     setBusy(rowKey(row));
@@ -230,7 +221,8 @@ export function ReviewPanel() {
         <tbody>
           {visible.map((row) => {
             const id = rowKey(row);
-            const selected = byId.get(chosen(row));
+            const attached = chosen(row);
+            const selected = byId.get(attached);
             return (
               <tr key={id}>
                 <td className="pick">
@@ -255,7 +247,9 @@ export function ReviewPanel() {
                     onChange={(event) => setWork((current) => withPick(current, id, event.target.value))}
                     disabled={busy !== null}
                   >
-                    {chosen(row) === '' && <option value="">Choose a channel…</option>}
+                    {attached === UNMATCHED && (
+                      <option value={UNMATCHED}>Unmatched — served as {row.canonicalId}</option>
+                    )}
                     {row.candidates.length > 0 && (
                       <optgroup label="Best matches">
                         {row.candidates.map((candidate) => (
@@ -273,11 +267,11 @@ export function ReviewPanel() {
                       ))}
                     </optgroup>
                   </select>
-                  <ChannelLogo url={selected?.iconUrl ?? null} name={selected?.name ?? '—'} />
+                  <ChannelLogo url={selected?.iconUrl ?? null} name={selected?.name ?? (attached === UNMATCHED ? row.canonicalId : '—')} />
                   <button
                     type="button"
                     onClick={() => void saveRow(row)}
-                    disabled={busy !== null || chosen(row) === ''}
+                    disabled={busy !== null || !writable(row)}
                   >
                     Save decision
                   </button>
