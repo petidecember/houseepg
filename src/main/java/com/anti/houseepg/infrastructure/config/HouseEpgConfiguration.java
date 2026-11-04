@@ -7,7 +7,7 @@ import com.anti.houseepg.application.config.ReseedRegistry;
 import com.anti.houseepg.application.config.port.ConfigDumpWriter;
 import com.anti.houseepg.application.config.port.DeclarationReader;
 import com.anti.houseepg.application.config.port.SourceOrderStore;
-import com.anti.houseepg.application.guide.BulkAcceptMatches;
+import com.anti.houseepg.application.guide.AcceptMatches;
 import com.anti.houseepg.application.guide.DecideMatch;
 import com.anti.houseepg.application.guide.GuideSettings;
 import com.anti.houseepg.application.guide.InspectGuide;
@@ -55,8 +55,8 @@ public class HouseEpgConfiguration {
     }
 
     @Bean
-    BulkAcceptMatches bulkAcceptMatches(ChannelMatchStore matchStore, RefreshGuide refreshGuide) {
-        return new BulkAcceptMatches(matchStore, () -> refreshGuide.refreshDue(Instant.now()));
+    AcceptMatches acceptMatches(ChannelMatchStore matchStore, GuideStore guideStore, RefreshGuide refreshGuide) {
+        return new AcceptMatches(matchStore, guideStore, () -> refreshGuide.refreshDue(Instant.now()));
     }
 
     @Bean

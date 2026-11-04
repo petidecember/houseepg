@@ -1,11 +1,12 @@
 package com.anti.houseepg.interfaces.web;
 
-import com.anti.houseepg.application.guide.BulkAcceptMatches;
+import com.anti.houseepg.application.guide.AcceptMatches;
 import com.anti.houseepg.application.guide.DecideMatch;
 import com.anti.houseepg.application.guide.InspectGuide;
 import com.anti.houseepg.application.guide.ReviewMatches;
 import com.anti.houseepg.domain.guide.model.Channel;
 import com.anti.houseepg.domain.guide.model.ChannelId;
+import com.anti.houseepg.domain.guide.model.Decision;
 import com.anti.houseepg.domain.guide.model.Programme;
 import com.anti.houseepg.domain.guide.model.SourceChannel;
 import com.anti.houseepg.domain.guide.policy.ChannelMatch;
@@ -34,14 +35,14 @@ public class InspectionController {
     private final InspectGuide inspectGuide;
     private final DecideMatch decideMatch;
     private final ReviewMatches reviewMatches;
-    private final BulkAcceptMatches bulkAcceptMatches;
+    private final AcceptMatches acceptMatches;
 
     public InspectionController(InspectGuide inspectGuide, DecideMatch decideMatch,
-            ReviewMatches reviewMatches, BulkAcceptMatches bulkAcceptMatches) {
+            ReviewMatches reviewMatches, AcceptMatches acceptMatches) {
         this.inspectGuide = inspectGuide;
         this.decideMatch = decideMatch;
         this.reviewMatches = reviewMatches;
-        this.bulkAcceptMatches = bulkAcceptMatches;
+        this.acceptMatches = acceptMatches;
     }
 
     @GetMapping("/api/channels")
@@ -71,13 +72,20 @@ public class InspectionController {
     }
 
     /**
-     * Accepts every exact id or exact name match in one write and one re-merge. A dry run reports the
-     * same set without writing, so the preview cannot disagree with the apply.
+     * Accepts the decisions the review list is showing, in one write and one re-merge. The set comes from the
+     * panel, because only the panel knows which rows are on screen; the server validates it. A dry run
+     * reports the same set without writing, so the preview cannot disagree with the apply.
      */
-    @PostMapping("/api/matches/bulk-accept")
-    public BulkAcceptResponse bulkAccept(
-            @RequestParam(name = "dryRun", defaultValue = "false") boolean dryRun) {
-        return BulkAcceptResponse.from(bulkAcceptMatches.accept(dryRun));
+    @PostMapping("/api/matches/accept")
+    public ResponseEntity<?> accept(@RequestBody AcceptRequest request) {
+        try {
+            List<Decision> decisions = request.decisions() == null
+                    ? List.of()
+                    : request.decisions().stream().map(DecisionRow::toDecision).toList();
+            return ResponseEntity.ok(AcceptResponse.from(acceptMatches.accept(decisions, request.dryRun())));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(new Problem(e.getMessage()));
+        }
     }
 
     /** The merged timeline for one channel, each slot carrying the source that won it. */
@@ -130,18 +138,29 @@ public class InspectionController {
         }
     }
 
-    public record BulkAcceptResponse(int count, boolean dryRun, List<BulkAcceptRowDto> rows) {
+    /** The panel sends the rows it is showing; the request carries no way to widen that set. */
+    public record AcceptRequest(boolean dryRun, List<DecisionRow> decisions) {
+    }
 
-        static BulkAcceptResponse from(BulkAcceptMatches.Result result) {
-            return new BulkAcceptResponse(result.count(), result.dryRun(),
-                    result.rows().stream().map(BulkAcceptRowDto::from).toList());
+    public record DecisionRow(String source, String sourceChannelId, String canonicalId) {
+
+        Decision toDecision() {
+            return new Decision(new SourceId(source), sourceChannelId, new ChannelId(canonicalId));
         }
     }
 
-    public record BulkAcceptRowDto(String source, String sourceChannelId, String canonicalId) {
+    public record AcceptResponse(int count, boolean dryRun, List<AcceptRowDto> rows) {
 
-        static BulkAcceptRowDto from(ChannelMatch match) {
-            return new BulkAcceptRowDto(match.source().source().value(), match.source().channelId(),
+        static AcceptResponse from(AcceptMatches.Result result) {
+            return new AcceptResponse(result.count(), result.dryRun(),
+                    result.rows().stream().map(AcceptRowDto::from).toList());
+        }
+    }
+
+    public record AcceptRowDto(String source, String sourceChannelId, String canonicalId) {
+
+        static AcceptRowDto from(ChannelMatch match) {
+            return new AcceptRowDto(match.source().source().value(), match.source().channelId(),
                     match.canonicalId().value());
         }
     }

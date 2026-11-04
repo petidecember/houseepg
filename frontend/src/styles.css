@@ -292,3 +292,9 @@ a {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
 }
+
+th.pick,
+td.pick {
+  width: 2.5rem;
+  padding-right: 0;
+}

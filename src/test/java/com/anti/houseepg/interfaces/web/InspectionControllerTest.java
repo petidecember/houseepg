@@ -1,12 +1,14 @@
 package com.anti.houseepg.interfaces.web;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.anti.houseepg.application.guide.DecideMatch;
-import com.anti.houseepg.application.guide.BulkAcceptMatches;
+import com.anti.houseepg.application.guide.AcceptMatches;
 import com.anti.houseepg.application.guide.InspectGuide;
 import com.anti.houseepg.application.guide.ReviewMatches;
 import com.anti.houseepg.domain.guide.model.Channel;
@@ -15,6 +17,9 @@ import com.anti.houseepg.domain.guide.model.Guide;
 import com.anti.houseepg.domain.guide.model.Programme;
 import com.anti.houseepg.domain.guide.model.Slot;
 import com.anti.houseepg.domain.guide.model.SourceId;
+import com.anti.houseepg.domain.guide.policy.ChannelMatch;
+import com.anti.houseepg.domain.guide.policy.MatchConfidence;
+import com.anti.houseepg.domain.guide.policy.SourceChannelRef;
 import com.anti.houseepg.support.InMemoryChannelMatchStore;
 import com.anti.houseepg.support.InMemoryGuideStore;
 import java.time.Instant;
@@ -95,6 +100,63 @@ class InspectionControllerTest {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    void acceptingASubsetWritesOnlyThatSubset() throws Exception {
+        bothChannels();
+
+        mvc().perform(post("/api/matches/accept")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"dryRun\":false,\"decisions\":[{\"source\":\"a\","
+                                + "\"sourceChannelId\":\"BRAVO.hu\",\"canonicalId\":\"bravo.xx\"}]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.count").value(1))
+                .andExpect(jsonPath("$.rows[0].sourceChannelId").value("BRAVO.hu"));
+
+        assertThat(matches.decisions())
+                .filteredOn(ChannelMatch::isCurated)
+                .extracting(match -> match.source().channelId())
+                .containsExactly("BRAVO.hu");
+    }
+
+    @Test
+    void aDryRunReportsTheCountWithoutWriting() throws Exception {
+        bothChannels();
+
+        mvc().perform(post("/api/matches/accept")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"dryRun\":true,\"decisions\":[{\"source\":\"a\","
+                                + "\"sourceChannelId\":\"BRAVO.hu\",\"canonicalId\":\"bravo.xx\"}]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.count").value(1))
+                .andExpect(jsonPath("$.dryRun").value(true));
+
+        assertThat(matches.decisions()).noneMatch(ChannelMatch::isCurated);
+    }
+
+    @Test
+    void aDecisionWithABlankCanonicalIdIsRejected() throws Exception {
+        bothChannels();
+
+        mvc().perform(post("/api/matches/accept")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"dryRun\":false,\"decisions\":[{\"source\":\"a\","
+                                + "\"sourceChannelId\":\"BRAVO.hu\",\"canonicalId\":\"\"}]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").exists());
+    }
+
+    /** Both channels in the registry, one automatic match each. */
+    private void bothChannels() {
+        Channel amc = new Channel(new ChannelId("amc.xx"), "AMC", null, null, Channel.Origin.PLAYLIST);
+        Channel bravo = new Channel(new ChannelId("bravo.xx"), "Bravo", null, null, Channel.Origin.PLAYLIST);
+        store.saveRegistry(List.of(amc, bravo));
+        matches.saveAuto(List.of(
+                ChannelMatch.auto(new SourceChannelRef(new SourceId("a"), "AMC.hu"), new ChannelId("amc.xx"),
+                        MatchConfidence.EXACT_ID),
+                ChannelMatch.auto(new SourceChannelRef(new SourceId("a"), "BRAVO.hu"), new ChannelId("bravo.xx"),
+                        MatchConfidence.NORMALIZED_NAME)));
+    }
+
     private void registry() {
         Channel amc = new Channel(new ChannelId("amc.xx"), "AMC", null, null, Channel.Origin.PLAYLIST);
         store.saveRegistry(List.of(amc));
@@ -110,7 +172,7 @@ class InspectionControllerTest {
         });
         return MockMvcBuilders
                 .standaloneSetup(new InspectionController(inspect, decide, new ReviewMatches(inspect),
-                        new BulkAcceptMatches(matches, () -> { })))
+                        new AcceptMatches(matches, store, () -> { })))
                 .build();
     }
 }

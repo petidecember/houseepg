@@ -1,5 +1,6 @@
 import type {
-  BulkAcceptResult,
+  AcceptResult,
+  Decision,
   Health,
   Match,
   PrioritySource,
@@ -64,8 +65,11 @@ export const api = {
   registry: () => request<Registry>('/api/channels'),
   review: (fuzzy: boolean, filter: string) =>
     request<Review>(`/api/review?fuzzy=${fuzzy}&filter=${encodeURIComponent(filter)}`),
-  bulkAccept: (dryRun: boolean) =>
-    request<BulkAcceptResult>(`/api/matches/bulk-accept?dryRun=${dryRun}`, { method: 'POST' }),
+  accept: (decisions: Decision[], dryRun: boolean) =>
+    request<AcceptResult>('/api/matches/accept', {
+      method: 'POST',
+      body: JSON.stringify({ dryRun, decisions }),
+    }),
   preview: (id: string) => request<Timeline>(`/api/preview/${encodeURIComponent(id)}`),
   decide: (body: { source: string; sourceChannelId: string; canonicalId: string }) =>
     request<Match>('/api/matches', { method: 'PUT', body: JSON.stringify(body) }),

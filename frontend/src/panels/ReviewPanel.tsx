@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { useLoader } from '../useLoader';
-import type { ReviewRow } from '../types';
+import type { Decision, ReviewRow } from '../types';
 
 const DEBUG_KEY = 'houseepg.review.debug';
 
@@ -22,6 +22,7 @@ export function ReviewPanel() {
   const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'bad' } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [preview, setPreview] = useState<number | null>(null);
+  const [excluded, setExcluded] = useState<Set<string>>(new Set());
 
   const load = useCallback(() => api.review(fuzzy, filter), [fuzzy, filter]);
   const { data, error, loading, reload } = useLoader(load);
@@ -30,6 +31,11 @@ export function ReviewPanel() {
     localStorage.setItem(DEBUG_KEY, debug ? '1' : '0');
   }, [debug]);
 
+
+  // A fresh list starts fully accepted: the user unchecks what looks wrong, not the reverse.
+  useEffect(() => {
+    setExcluded(new Set());
+  }, [data]);
   const channels = data?.channels ?? [];
   const rows = data?.rows ?? [];
   const byId = useMemo(() => new Map(channels.map((channel) => [channel.id, channel])), [channels]);
@@ -61,6 +67,23 @@ export function ReviewPanel() {
     return byId.has(row.canonicalId) ? row.canonicalId : '';
   };
 
+  /**
+   * A row can only be written when the user picked a channel or the matcher offered one. The dropdown's
+   * third fallback — the row's current match id — is display only: it can show a channel nobody chose, and
+   * writing it would confirm a match the user never saw.
+   */
+  const writable = (row: ReviewRow): boolean => Boolean(target[key(row)]) || row.candidates.length > 0;
+
+  /** What one accept writes: the rows on screen, included, writable and not already decided. */
+  const accepted = visible.filter((row) => writable(row) && !row.curated && !excluded.has(key(row)));
+
+  const decisions = (rows: ReviewRow[]): Decision[] =>
+    rows.map((row) => ({
+      source: row.source,
+      sourceChannelId: row.sourceChannelId,
+      canonicalId: chosen(row),
+    }));
+
   const save = async (row: ReviewRow) => {
     const canonicalId = chosen(row);
     if (canonicalId === '') {
@@ -82,20 +105,20 @@ export function ReviewPanel() {
     }
   };
 
-  const previewBulk = async () => {
+  const previewAccept = async () => {
     setNotice(null);
     try {
-      const result = await api.bulkAccept(true);
+      const result = await api.accept(decisions(accepted), true);
       setPreview(result.count);
     } catch (e) {
       setNotice({ text: e instanceof Error ? e.message : String(e), tone: 'bad' });
     }
   };
 
-  const applyBulk = async () => {
-    setBusy('bulk');
+  const applyAccept = async () => {
+    setBusy('accept');
     try {
-      const result = await api.bulkAccept(false);
+      const result = await api.accept(decisions(accepted), false);
       setPreview(null);
       setNotice({ text: `Curated ${result.count} row(s).`, tone: 'ok' });
       await reload();
@@ -119,7 +142,8 @@ export function ReviewPanel() {
       <p className="hint">
         One row per source channel that still needs a decision. The dropdown opens on the best candidate; the
         source logo on the left and the selected channel's logo on the right are there to compare. A saved
-        decision survives every later automatic pass.
+        decision survives every later automatic pass. Uncheck the rows that look wrong and accept the rest in
+        one go.
       </p>
       {notice && <p className={notice.tone === 'bad' ? 'error' : 'ok-note'}>{notice.text}</p>}
       <div className="actions">
@@ -149,13 +173,17 @@ export function ReviewPanel() {
           {visible.length} row(s), {channels.length} registry channels
         </span>
         {preview === null ? (
-          <button type="button" onClick={() => void previewBulk()} disabled={busy !== null}>
-            Accept exact matches…
+          <button
+            type="button"
+            onClick={() => void previewAccept()}
+            disabled={busy !== null || accepted.length === 0}
+          >
+            Accept matches…
           </button>
         ) : (
           <span className="bulk-confirm">
             <span className="muted">Would curate {preview} row(s).</span>
-            <button type="button" onClick={() => void applyBulk()} disabled={busy !== null || preview === 0}>
+            <button type="button" onClick={() => void applyAccept()} disabled={busy !== null || preview === 0}>
               Apply
             </button>
             <button type="button" onClick={() => setPreview(null)} disabled={busy !== null}>
@@ -167,6 +195,7 @@ export function ReviewPanel() {
       <table>
         <thead>
           <tr>
+            <th className="pick" />
             <th>Source channel</th>
             <th>Matched to</th>
             {debug && <th>Evidence</th>}
@@ -178,6 +207,23 @@ export function ReviewPanel() {
             const selected = byId.get(chosen(row));
             return (
               <tr key={id}>
+                <td className="pick">
+                  <input
+                    type="checkbox"
+                    aria-label={`Include ${row.sourceChannelName ?? row.sourceChannelId}`}
+                    checked={!excluded.has(id)}
+                    disabled={!writable(row) || row.curated || busy !== null}
+                    onChange={(event) => {
+                      const next = new Set(excluded);
+                      if (event.target.checked) {
+                        next.delete(id);
+                      } else {
+                        next.add(id);
+                      }
+                      setExcluded(next);
+                    }}
+                  />
+                </td>
                 <td className="source-cell">
                   <ChannelLogo url={row.sourceIconUrl} name={row.sourceChannelName ?? row.sourceChannelId} />
                   <span>
@@ -229,7 +275,7 @@ export function ReviewPanel() {
           })}
           {visible.length === 0 && (
             <tr>
-              <td colSpan={debug ? 3 : 2} className="muted">
+              <td colSpan={debug ? 4 : 3} className="muted">
                 Nothing needs a decision here.
               </td>
             </tr>

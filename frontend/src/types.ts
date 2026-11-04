@@ -102,7 +102,14 @@ export type Review = {
   channels: Channel[];
 };
 
-export type BulkAcceptResult = {
+/** One row the panel is accepting: the source channel and the channel it should point at. */
+export type Decision = {
+  source: string;
+  sourceChannelId: string;
+  canonicalId: string;
+};
+
+export type AcceptResult = {
   count: number;
   dryRun: boolean;
   rows: { source: string; sourceChannelId: string; canonicalId: string }[];
