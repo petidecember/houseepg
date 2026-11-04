@@ -235,46 +235,50 @@ export function ReviewPanel() {
                   />
                 </td>
                 <td className="source-cell">
-                  <ChannelLogo url={row.sourceIconUrl} name={row.sourceChannelName ?? row.sourceChannelId} />
-                  <span>
-                    <strong>{row.sourceChannelName ?? row.sourceChannelId}</strong>
-                    <span className="muted"> {row.source}</span>
-                  </span>
+                  <div className="source-cell-inner">
+                    <ChannelLogo url={row.sourceIconUrl} name={row.sourceChannelName ?? row.sourceChannelId} />
+                    <span>
+                      <strong>{row.sourceChannelName ?? row.sourceChannelId}</strong>
+                      <span className="muted"> {row.source}</span>
+                    </span>
+                  </div>
                 </td>
                 <td className="decide">
-                  <select
-                    value={chosen(row)}
-                    onChange={(event) => setWork((current) => withPick(current, id, event.target.value))}
-                    disabled={busy !== null}
-                  >
-                    {attached === UNMATCHED && (
-                      <option value={UNMATCHED}>Unmatched — served as {row.canonicalId}</option>
-                    )}
-                    {row.candidates.length > 0 && (
-                      <optgroup label="Best matches">
-                        {row.candidates.map((candidate) => (
-                          <option key={candidate.id} value={candidate.id}>
-                            {optionLabel(candidate)}
+                  <div className="decide-inner">
+                    <select
+                      value={chosen(row)}
+                      onChange={(event) => setWork((current) => withPick(current, id, event.target.value))}
+                      disabled={busy !== null}
+                    >
+                      {attached === UNMATCHED && (
+                        <option value={UNMATCHED}>Unmatched — served as {row.canonicalId}</option>
+                      )}
+                      {row.candidates.length > 0 && (
+                        <optgroup label="Best matches">
+                          {row.candidates.map((candidate) => (
+                            <option key={candidate.id} value={candidate.id}>
+                              {optionLabel(candidate)}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      <optgroup label="All channels">
+                        {channels.map((channel) => (
+                          <option key={channel.id} value={channel.id}>
+                            {optionLabel(channel)}
                           </option>
                         ))}
                       </optgroup>
-                    )}
-                    <optgroup label="All channels">
-                      {channels.map((channel) => (
-                        <option key={channel.id} value={channel.id}>
-                          {optionLabel(channel)}
-                        </option>
-                      ))}
-                    </optgroup>
-                  </select>
-                  <ChannelLogo url={selected?.iconUrl ?? null} name={selected?.name ?? (attached === UNMATCHED ? row.canonicalId : '—')} />
-                  <button
-                    type="button"
-                    onClick={() => void saveRow(row)}
-                    disabled={busy !== null || !writable(row)}
-                  >
-                    Save decision
-                  </button>
+                    </select>
+                    <ChannelLogo url={selected?.iconUrl ?? null} name={selected?.name ?? (attached === UNMATCHED ? row.canonicalId : '—')} />
+                    <button
+                      type="button"
+                      onClick={() => void saveRow(row)}
+                      disabled={busy !== null || !writable(row)}
+                    >
+                      Save decision
+                    </button>
+                  </div>
                 </td>
                 {debug && (
                   <td className="muted debug">

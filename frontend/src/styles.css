@@ -155,8 +155,14 @@ tbody tr:last-child td {
   border-bottom: none;
 }
 
-td.decide {
+/*
+ * The flex layout lives on a wrapper inside the cell, never on the cell itself: `display: flex`
+ * on a <td> takes it out of the table's cell layout, so the row has fewer cells than the header
+ * has columns and every column after it shifts one to the left (HOU-26).
+ */
+.decide-inner {
   display: flex;
+  align-items: center;
   gap: 6px;
   flex-wrap: wrap;
 }
@@ -256,7 +262,7 @@ a {
   color: var(--accent);
 }
 
-.source-cell {
+.source-cell-inner {
   display: flex;
   align-items: center;
   gap: 8px;
