@@ -16,9 +16,11 @@ import org.slf4j.LoggerFactory;
  * Use case: the review list a human works through — one row per source channel that still needs a
  * decision, each carrying the ranked candidates the domain suggests (design §10).
  *
- * <p>The default filter is the point of the card: a row that is already curated, or that matched on an
- * exact id or name, is not worth a human's attention, so it is not in the list. The list therefore
- * shrinks as the work gets done.
+ * <p>The default filter is the point of the card: a row that is already curated, that matched on an
+ * exact id or name, or that the matcher could suggest nothing for, is not worth a human's attention, so
+ * it is not in the list. A row with nothing to choose between is not a decision — it is a source or
+ * registry signal, and it is listed under {@code unmatched} instead. The list therefore shrinks as the
+ * work gets done.
  */
 public class ReviewMatches {
 
@@ -50,6 +52,9 @@ public class ReviewMatches {
                             ? new SourceChannel(match.source().channelId(), null, null)
                             : sourceChannel,
                     fuzzy);
+            if (filter.requiresCandidates() && candidates.isEmpty()) {
+                continue;
+            }
             rows.add(new Row(match, sourceChannel, candidates));
             if (fuzzy && !isExact(match.confidence())) {
                 if (isUnambiguous(candidates)) {
@@ -87,7 +92,10 @@ public class ReviewMatches {
     /** Which rows the list shows. */
     public enum Filter {
 
-        /** Not curated, and not an exact id or name match: the rows a human still adds value to. */
+        /**
+         * Not curated, not an exact id or name match, and carrying at least one candidate: the rows
+         * where there is a value to choose between.
+         */
         NEEDS_DECISION,
         ALL,
         CURATED,
@@ -113,6 +121,22 @@ public class ReviewMatches {
                 case UNMATCHED -> match.state() == MatchState.UNMATCHED;
                 case NEEDS_DECISION -> !match.isCurated() && !isExact(match.confidence());
             };
+        }
+
+        /**
+         * True when a row that passed {@link #accepts} is only worth showing once it has a candidate.
+         *
+         * <p>A row the matcher could suggest nothing for cannot be decided from this list: there is no
+         * value to confirm and none to correct. It belongs under {@code unmatched}, so this filter drops
+         * it — but only the ranking knows whether there is a candidate, so the question is asked after
+         * the candidates are ranked, and the filters that do not ask it never rank a row they would drop.
+         *
+         * <p>With {@code fuzzy} on, a suggestion above the similarity threshold counts as that candidate,
+         * which is exactly what the switch is for: it turns rows that could not be decided into rows that
+         * can.
+         */
+        boolean requiresCandidates() {
+            return this == NEEDS_DECISION;
         }
     }
 

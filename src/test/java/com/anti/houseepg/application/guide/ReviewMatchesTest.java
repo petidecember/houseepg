@@ -63,9 +63,21 @@ class ReviewMatchesTest {
     }
 
     @Test
-    void theDefaultListKeepsNormalizedAndUnmatchedRows() {
+    void theDefaultListKeepsRowsWithACandidate() {
         assertThat(sources(review.review(false, ReviewMatches.Filter.NEEDS_DECISION)))
-                .containsExactlyInAnyOrder("bravo.xx", "sky.xx", "zzz.xx");
+                .containsExactly("bravo.xx");
+    }
+
+    @Test
+    void theDefaultListDropsRowsTheMatcherCouldSuggestNothingFor() {
+        assertThat(sources(review.review(false, ReviewMatches.Filter.NEEDS_DECISION)))
+                .doesNotContain("sky.xx", "zzz.xx");
+    }
+
+    @Test
+    void withFuzzyARowWhoseOnlyValueIsASuggestionIsWorthDeciding() {
+        assertThat(sources(review.review(true, ReviewMatches.Filter.NEEDS_DECISION)))
+                .containsExactlyInAnyOrder("bravo.xx", "sky.xx");
     }
 
     @Test
