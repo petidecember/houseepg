@@ -304,3 +304,203 @@ td.pick {
   width: 2.5rem;
   padding-right: 0;
 }
+
+/* The merge preview (design §6.6). The striped surface is the default background of the whole grid, so
+   a programme block drawn on top of it is what makes "nothing here" visible as stripes rather than as a
+   hole. The stripes belong to the grid, never to a single column, or the pattern would restart per
+   column and seam. */
+.merge-preview {
+  margin-top: 28px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+
+.merge-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.merge-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.merge-controls input,
+.merge-controls select {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font: inherit;
+}
+
+.merge-controls input[type='number'] {
+  width: 4.5rem;
+}
+
+.merge-toggle {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 6px !important;
+}
+
+.merge-grid {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* One striped surface behind everything: the columns are transparent, so the stripes read as a single
+   sheet and the hour rules, when shown, sit on top of the same sheet. */
+.merge-gutter,
+.merge-col {
+  position: relative;
+  background: repeating-linear-gradient(45deg, #22262f 0 6px, #191c22 6px 12px);
+}
+
+.merge-gutter {
+  width: 3.5rem;
+  flex: 0 0 auto;
+}
+
+.merge-gutter .tick {
+  position: absolute;
+  left: 0;
+  right: 0;
+  transform: translateY(-50%);
+  padding-right: 6px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.merge-col {
+  flex: 1 1 0;
+  min-width: 0;
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+}
+
+.merge-result {
+  border-left: 2px solid var(--accent);
+  flex: 1.2 1 0;
+}
+
+.merge-col-head {
+  padding: 6px 8px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.merge-track {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 320px;
+}
+
+.merge-col-case {
+  padding: 6px 8px;
+  font-size: 11px;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+
+/* Hour rules are an overlay on the shared surface, so hiding them hides exactly the lines and nothing
+   about the columns or the stripes. */
+.merge-grid.with-rules .merge-col::before,
+.merge-grid.with-rules .merge-result::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* One rule per hour: the step is set from the span, so a 5 h window gets five lines. */
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.1) 0 1px,
+    transparent 1px var(--hour-step, 20%)
+  );
+}
+
+.block {
+  position: absolute;
+  left: 0;
+  right: 0;
+  overflow: hidden;
+  padding: 3px 6px;
+  font-size: 11px;
+  line-height: 1.25;
+  border-left: 3px solid var(--line);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* Full-bleed green and red, no rounded corners: the block covers the striped surface it claimed. */
+.block.won {
+  background: #16241d;
+  border-left-color: var(--ok);
+}
+
+.block.lost {
+  background: #241618;
+  border-left-color: var(--bad);
+}
+
+.block.excluded {
+  background: #1a1e28;
+  border-left-color: var(--muted);
+}
+
+.block-title {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.block-why,
+.block-weak,
+.block-winner {
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.block-weak {
+  color: var(--warn);
+}
+
+.block-winner {
+  color: var(--ok);
+}
+
+.now-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 2px solid #d05a5a;
+  pointer-events: none;
+}
+
+.merge-footer {
+  margin-top: 8px;
+}

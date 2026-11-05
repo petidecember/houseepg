@@ -114,3 +114,64 @@ export type AcceptResult = {
   dryRun: boolean;
   rows: { source: string; sourceChannelId: string; canonicalId: string }[];
 };
+
+/** One span the preview draws: a programme block, a gap, or the result's own coverage. */
+export type PreviewSpan = {
+  start: string;
+  stop: string;
+};
+
+export type PreviewWeakness = {
+  field: 'description' | 'icon' | 'category' | 'episode';
+  from: string;
+};
+
+/** One provider's entry inside the preview window, with the fate the merge walk gave it. */
+export type PreviewEntry = {
+  start: string;
+  stop: string;
+  title: string | null;
+  description: string | null;
+  category: string | null;
+  episode: string | null;
+  fate: 'WON' | 'LOST' | 'EXCLUDED';
+  lostTo: string | null;
+  weaker: PreviewWeakness[];
+};
+
+/** One provider column: what it carried, where its data went instead, and the window it fills. */
+export type PreviewColumn = {
+  source: string;
+  channelId: string | null;
+  channelName: string | null;
+  carriesElsewhere: string | null;
+  entries: PreviewEntry[];
+  window: { coverage: PreviewSpan[]; gaps: PreviewSpan[] };
+  caseLabel: string;
+};
+
+/** One programme the feed serves once the previewed order is applied. */
+export type PreviewResultEntry = {
+  start: string;
+  stop: string;
+  title: string | null;
+  description: string | null;
+  category: string | null;
+  episode: string | null;
+  source: string;
+  weaker: PreviewWeakness[];
+};
+
+/** The merge preview for one channel and one window (design §6.6). */
+export type MergePreview = {
+  id: string | null;
+  name: string | null;
+  columns: PreviewColumn[];
+  result: { entries: PreviewResultEntry[]; window: { coverage: PreviewSpan[]; gaps: PreviewSpan[] } };
+};
+
+export type PreviewWindow = {
+  day: string;
+  from: string;
+  hours: number;
+};

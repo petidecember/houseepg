@@ -274,6 +274,80 @@ canonical channel ─────────────── time ───�
   emitted     [ A ][ B ][ C ]
 ```
 
+**Nothing above is visible while it happens.** §6.3 is why a source can sit at priority #1 and still
+contribute nothing, and the ordering is what a person changes. §6.6 is the shape that makes the
+consequence visible *before* it is applied.
+
+### 6.6 The merge preview, in pictures
+
+Two surfaces show merged data, and they answer different questions.
+
+| | Guide panel | Merge preview (HOU-25) |
+| --- | --- | --- |
+| Scope | every channel | **one channel**, chosen from a dropdown |
+| Order | the applied priority | the **draft** order in the panel, labelled *not applied yet* |
+| Content | the finished merge | **per provider**: each entry and its fate |
+| Answers | "what will my DVR see" | "what does reordering cost me" |
+| Changes the feed | it *is* the feed | **never** — Apply order is still the only thing that does |
+
+**Layout.** Providers left to right in rank order, then the merge result on the right.
+
+```text
+  provider order    #1 Alpha TV   #2 Beta Télé   #3 Gamma Sat   #4 Delta Media
+  ─────────────────────────────────────────────────────────────────────────────
+  channel      Alpha TV HD        day 05/11/2026   from 20:00   span [5 h]  ☑ guide lines
+                                                                    20:00 ──▶ 01:00
+  ┌───────────────┬───────────────┬───────────────┬───────────────┬───────────────┐
+  │ 1 Alpha TV    │ 2 Beta Télé   │ 3 Gamma Sat   │ 4 Delta Media │ Merge result  │
+  ├───────────────┼───────────────┼───────────────┼───────────────┼───────────────┤
+  │▒20:00 Wild Afr│▒20:00 Wild Afr│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│▒20:00 Wild Afr│
+  │▒      ████████│▒  ✗ α claimed │▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│▒  ✓  Alpha TV │
+  │▒21:00 Deep Ocn│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│▒21:00 Deep Ocn│
+  │▒      ████████│▒22:30 Ciel Noc│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│▒  ✓  Alpha TV │
+  │▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│▒      ████████│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│▒  ⚠ no descript│
+  │▒▒▒▒▒  now ▒▒▒▒│▒▒▒▒▒▒▒  now ▒▒│▒▒▒▒▒▒▒  now ▒▒│▒▒▒▒▒▒▒  now ▒▒│▒22:30 Ciel Noc │
+  │▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│▒  ✓  Beta Télé │
+  └───────────────┴───────────────┴───────────────┴───────────────┴───────────────┘
+       won whole    lost 20:00–21:00     nothing in       a different        the feed
+                    to Alpha TV         this window      canonical channel
+```
+
+- **The clock is vertical and shared.** Time runs down the left gutter; every column is the same
+  window laid out top to bottom, so a programme's **height is its duration** and the `now` marker
+  lines up across all five. The span is chosen in **hours**, not in a count of programmes.
+- **Stripes mean "nothing here".** One striped surface runs behind all columns; programme blocks are
+  drawn on top of it, full-bleed. So the stripes appear exactly where no entry covers the time —
+  Alpha TV after 22:00, Gamma Sat and Delta Media entirely, and every column past the end of the
+  published data. There is **no text inside them**: "no programme" and "no data published" are
+  deliberately drawn identically, and the coverage span and gap count are what tell them apart.
+- **Colour is the only verdict.** Green: the entry won (or the result carries it). Red: it lost an
+  overlap, with the reason inline (`lost 20:00–21:00 — Alpha TV claimed it first`). No `carried` or
+  `dropped` labels, no legend — the design language carries it.
+- **Every provider column states its own case**, so a column is never blank and never silent:
+  1. it won entries; 2. it lost them to a named overlap; 3. it does not carry this channel;
+  4. it carries a channel matched to a *different* canonical channel (named) and therefore cannot
+  take part, however the order is arranged; 5. it carries this channel but has nothing in the window.
+- **The merge result column is the channel's whole feed**, served from the same state the live merge
+  would serve, and the window only decides how much of it is drawn: a programme that starts before the
+  window still belongs to the feed and its span is clipped to the window when it is drawn. What the
+  window does decide is the footer's arithmetic — the covered span and the gaps are measured inside it.
+  Each carried programme is tagged with the
+  provider that won it, and an amber callout when the winner is poorer than a loser for the same
+  fields (`weaker: description — Beta Télé had one`). Its footer carries the covered span, the
+  programme and gap counts, and the reminder that nothing changes until **Apply order**.
+- **Defaults and pickers.** The preview opens on the **first channel in the list**, **today**, at the
+  **current time**, with a default span; the day picker only steps across days the channel has data
+  for, and the start-time picker within them. Hour rules can be switched off when they get in the
+  way.
+
+**One walk, two callers.** The preview must not be a second merge engine: the slot-claim loop of
+`PriorityMerge.merge` (§6.3) is extracted into a **pure function that takes the order as a
+parameter**, and both the live merge and the preview call it. A preview that disagreed with the feed
+would be worse than no preview. The preview needs new *data access* — per-source normalized
+documents and their canonical ids — but nothing new persisted, and the Guide panel is unchanged.
+
+
+
 ## 7. Persistence
 
 Three layers in MongoDB. The database is an **intermediate representation of the merge**: everything
@@ -325,6 +399,7 @@ application at a dedicated database.
 | `GET /api/sources/status` | Per-source health, last refresh, last error. |
 | `POST /api/sources/{id}/refresh` | Manual refresh. |
 | `GET /api/preview/{canonicalChannelId}` | Merged timeline with the winning source per slot. |
+| `GET /api/merge/{canonicalChannelId}?day=&from=&hours=&order=` | Per-provider merge breakdown for one channel over one window (§6.6). `order` overrides the applied priority, which is how the draft order is previewed; omitting it uses the applied order. A channel id no provider serves — not even as a pass-through channel — is a 404, because there is no breakdown to explain. |
 
 These endpoints exist to serve the UI. They are not a supported JSON API.
 
@@ -332,7 +407,13 @@ These endpoints exist to serve the UI. They are not a supported JSON API.
 
 Drag-to-reorder priority · channel auto-match review (confirm/correct) · registry view ·
 per-source health and last refresh · manual refresh now · "reload config" · "dump config to log" ·
-merged-guide preview per channel **showing the winning source per slot** · guide viewer.
+merged-guide preview per channel **showing the winning source per slot** · guide viewer ·
+**merge preview** on the Priority page — one channel, providers in draft order, each entry's fate
+(§6.6).
+
+The merge preview is the second half of the priority panel: it is what makes a reorder's cost visible
+before Apply order commits it. It is explicitly **not** a second merge engine — it calls the same
+slot-claim walk as the live merge, and it changes nothing until the user applies.
 
 There is **no source CRUD**: sources are declared in YAML and the UI may only change their order
 (ADR-0005). Reordering warns that it changes which source is primary and may therefore change emitted

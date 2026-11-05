@@ -3,6 +3,7 @@ import type {
   Decision,
   Health,
   Match,
+  MergePreview,
   PrioritySource,
   Registry,
   ReloadResult,
@@ -71,6 +72,8 @@ export const api = {
       body: JSON.stringify({ dryRun, decisions }),
     }),
   preview: (id: string) => request<Timeline>(`/api/preview/${encodeURIComponent(id)}`),
+  merge: (id: string, query: string) =>
+    request<MergePreview>(`/api/merge/${encodeURIComponent(id)}?${query}`),
   decide: (body: { source: string; sourceChannelId: string; canonicalId: string }) =>
     request<Match>('/api/matches', { method: 'PUT', body: JSON.stringify(body) }),
 };

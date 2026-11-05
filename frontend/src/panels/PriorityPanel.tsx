@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { useLoader } from '../useLoader';
 import type { PrioritySource } from '../types';
+import { MergePreview } from './MergePreview';
 
 /**
  * The only configuration the UI may change: the source order. Reordering decides which source wins a
@@ -9,6 +10,7 @@ import type { PrioritySource } from '../types';
  */
 export function PriorityPanel() {
   const { data, error, loading, reload } = useLoader(api.priority);
+  const registry = useLoader(api.registry);
   const [order, setOrder] = useState<PrioritySource[]>([]);
   const [dirty, setDirty] = useState(false);
   const [notice, setNotice] = useState<{ text: string; tone: 'ok' | 'warn' | 'bad' } | null>(null);
@@ -105,6 +107,11 @@ export function PriorityPanel() {
           Reset
         </button>
       </div>
+      <MergePreview
+        order={order}
+        dirty={dirty}
+        channels={registry.data?.channels ?? []}
+      />
     </section>
   );
 }

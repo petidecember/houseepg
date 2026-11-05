@@ -11,6 +11,7 @@ import com.anti.houseepg.application.guide.AcceptMatches;
 import com.anti.houseepg.application.guide.DecideMatch;
 import com.anti.houseepg.application.guide.GuideSettings;
 import com.anti.houseepg.application.guide.InspectGuide;
+import com.anti.houseepg.application.guide.MergeBreakdown;
 import com.anti.houseepg.application.guide.ReviewMatches;
 import com.anti.houseepg.application.guide.RefreshGuide;
 import com.anti.houseepg.application.guide.ServeGuide;
@@ -67,6 +68,10 @@ public class HouseEpgConfiguration {
     @Bean
     InspectGuide inspectGuide(GuideStore guideStore, ChannelMatchStore matchStore) {
         return new InspectGuide(guideStore, matchStore);
+    }
+    @Bean
+    MergeBreakdown mergeBreakdown(GuideStore guideStore, ChannelMatchStore matchStore, GuideSettings settings) {
+        return new MergeBreakdown(guideStore, matchStore, settings);
     }
 
     @Bean

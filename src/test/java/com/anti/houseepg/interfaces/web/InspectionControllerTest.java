@@ -8,6 +8,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.anti.houseepg.application.guide.DecideMatch;
+import com.anti.houseepg.application.guide.GuideSettings;
+import com.anti.houseepg.application.guide.MergeBreakdown;
 import com.anti.houseepg.application.guide.AcceptMatches;
 import com.anti.houseepg.application.guide.InspectGuide;
 import com.anti.houseepg.application.guide.ReviewMatches;
@@ -16,16 +18,22 @@ import com.anti.houseepg.domain.guide.model.ChannelId;
 import com.anti.houseepg.domain.guide.model.Guide;
 import com.anti.houseepg.domain.guide.model.Programme;
 import com.anti.houseepg.domain.guide.model.Slot;
+import com.anti.houseepg.domain.guide.model.SourceChannel;
+import com.anti.houseepg.domain.guide.model.SourceEpg;
 import com.anti.houseepg.domain.guide.model.SourceId;
+import com.anti.houseepg.domain.guide.model.SourceProgramme;
 import com.anti.houseepg.domain.guide.policy.ChannelMatch;
 import com.anti.houseepg.domain.guide.policy.MatchConfidence;
 import com.anti.houseepg.domain.guide.policy.SourceChannelRef;
+import com.anti.houseepg.application.guide.port.EpgSource;
 import com.anti.houseepg.support.InMemoryChannelMatchStore;
 import com.anti.houseepg.support.InMemoryGuideStore;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -134,6 +142,66 @@ class InspectionControllerTest {
     }
 
     @Test
+    void theMergeEndpointExplainsTheProviderAndTheFeedThatResults() throws Exception {
+        mergeFixture();
+
+        mvc().perform(get("/api/merge/amc.xx").param("day", "2026-11-05").param("from", "00:00")
+                        .param("hours", "24"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value("amc.xx"))
+                .andExpect(jsonPath("$.name").value("AMC"))
+                .andExpect(jsonPath("$.columns[0].source").value("a"))
+                .andExpect(jsonPath("$.columns[0].channelId").value("AMC.hu"))
+                .andExpect(jsonPath("$.columns[0].caseLabel").value("won"))
+                .andExpect(jsonPath("$.columns[0].entries[0].title").value("Film"))
+                .andExpect(jsonPath("$.columns[0].entries[0].fate").value("WON"))
+                .andExpect(jsonPath("$.columns[0].window.gaps").isArray())
+                .andExpect(jsonPath("$.result.entries[0].title").value("Film"))
+                .andExpect(jsonPath("$.result.entries[0].source").value("a"));
+    }
+
+    @Test
+    void aPreviewOrderNamingUnknownSourcesIsRejected() throws Exception {
+        mergeFixture();
+
+        mvc().perform(get("/api/merge/amc.xx").param("day", "2026-11-05").param("from", "00:00")
+                        .param("hours", "24").param("order", "a", "ghost"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").exists());
+    }
+
+    @Test
+    void previewingAChannelNobodyServesIsNotFound() throws Exception {
+        mergeFixture();
+
+        mvc().perform(get("/api/merge/nope.xx").param("day", "2026-11-05").param("from", "00:00")
+                        .param("hours", "24"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void aPreviewWithoutAnOrderUsesTheAppliedOne() throws Exception {
+        mergeFixture();
+
+        // The window is read in the running zone, so a whole day is what keeps this test zone-agnostic.
+        mvc().perform(get("/api/merge/amc.xx").param("day", "2026-11-05").param("from", "00:00")
+                        .param("hours", "24"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.columns[0].caseLabel").value("won"))
+                .andExpect(jsonPath("$.result.entries[0].source").value("a"));
+    }
+
+    @Test
+    void aPreviewWindowOfNoHoursIsRejected() throws Exception {
+        mergeFixture();
+
+        mvc().perform(get("/api/merge/amc.xx").param("day", "2026-11-05").param("from", "00:00")
+                        .param("hours", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").exists());
+    }
+
+    @Test
     void aDecisionWithABlankCanonicalIdIsRejected() throws Exception {
         bothChannels();
 
@@ -157,6 +225,22 @@ class InspectionControllerTest {
                         MatchConfidence.NORMALIZED_NAME)));
     }
 
+    private GuideSettings settings = new GuideSettings(List.of(), Optional.empty());
+
+    /** One provider carrying one programme on the day the preview tests ask about. */
+    private void mergeFixture() {
+        Channel amc = new Channel(new ChannelId("amc.xx"), "AMC", null, null, Channel.Origin.PLAYLIST);
+        store.saveRegistry(List.of(amc));
+        OffsetDateTime start = OffsetDateTime.of(2026, 11, 5, 20, 0, 0, 0, ZoneOffset.UTC);
+        store.saveNormalized(new SourceEpg(new SourceId("a"),
+                List.of(new SourceChannel("AMC.hu", "AMC", null)),
+                List.of(new SourceProgramme("AMC.hu", new Slot(start, start.plusHours(1)), "Film",
+                        "A film", "movie", null, null))),
+                Map.of());
+        settings = new GuideSettings(List.of(EpgSource.of("a", "Alpha", "http://alpha/epg.xml", null)),
+                Optional.empty());
+    }
+
     private void registry() {
         Channel amc = new Channel(new ChannelId("amc.xx"), "AMC", null, null, Channel.Origin.PLAYLIST);
         store.saveRegistry(List.of(amc));
@@ -172,7 +256,8 @@ class InspectionControllerTest {
         });
         return MockMvcBuilders
                 .standaloneSetup(new InspectionController(inspect, decide, new ReviewMatches(inspect),
-                        new AcceptMatches(matches, store, () -> { })))
+                        new AcceptMatches(matches, store, () -> { }),
+                        new MergeBreakdown(store, matches, settings)))
                 .build();
     }
 }
