@@ -178,6 +178,81 @@ wholesale. A lower-priority movie 19:45–21:00 overlapping a higher-priority 20
 disappears completely, leaving 19:45–20:00 empty. The output is therefore **not a fully tiled
 timeline**; holes are expected and are the DVR client's problem to render as "no data". See ADR-0001.
 
+#### One source competing with itself
+
+The walk compares **slots and source order** only. It has no notion of "the same source", "the same
+spelling" or "the same title", so the rule applies inside a single source exactly as it does between two:
+
+| | between providers | within one source |
+| --- | --- | --- |
+| what is compared | slot overlap | slot overlap |
+| order used | source priority, then start | source priority, then start |
+| tie-break available | the higher-priority provider wins | **none — the earlier entry wins** |
+| what the loser keeps | nothing, dropped whole | nothing, dropped whole |
+| what the UI says | the merge preview (§6.6) | nothing; the entry is simply absent |
+
+**That missing tie-break is the point.** Across providers, "first in the order wins" is a decision an
+operator made. Inside one source there is no such decision: the order is the file's declaration order.
+The walk cannot tell a real contest from a provider that shipped the same programme twice, and resolves
+both the same way.
+
+Re-measured on a live store with four enabled sources. Counting only overlaps **inside one source
+channel id** (the walk as it resolves one source's own contest), against what is actually served:
+
+```
+source          raw      lost   share   exact dup   ids affected
+live-hutv      7970       260    3.3 %         14             24
+provider-a    32765         0    0.0 %          0              0
+provider-b    13196         0    0.0 %          0              0
+provider-c    23986         0    0.0 %          0              0
+```
+
+`live-hutv` is the only one of the four that competes with itself at all, losing 260 of 7970 entries
+(3.3 %) across 24 channel ids: `nicktoons.hu` 82, `nickjr.hu` 68, `Canal+ Action.hu` 18,
+`Filmbox+ Emotion HD.hu` 15. The provider ships a normal-length entry and a shorter one nested inside its
+tail, then repeats:
+
+```
+         18:10       18:30 18:35        18:45       19:05 19:10        19:30
+          |-----=====|      |-------------|          |-----=======|
+                 |=X==|                                  |=X===|
+   won   18:10-18:30        won   18:30-18:45        won   18:45-19:05
+   won   18:30-18:45        won   18:45-19:05        won   19:05-19:30
+   LOST  18:35-18:45        ...                      LOST  19:10-19:30
+```
+
+The surviving schedule stays coherent, which is why this is only visible as *"my feed has fewer
+programmes than the XML file"*. The other three sources publish fully tiled timelines with no internal
+overlap, so this is a property of one provider, not of the rule.
+
+**Where a source's own overlaps are actually resolved, though, is usually not per channel id.** Matches
+from every source land in one canonical channel's walk, and the live store has 350 channels fed where the
+registry holds 133 emitted ids — the rest are pass-through channels no provider declared, and **18
+normalised keys cover two emitted ids each** (`atv` → `atv.hu` and `ATV (HD).hu`; same for `tv2`,
+`supertv2`, `dunatv`, `m5`, `m4sport`, `sport1`, `sport2`, `cool`, `tv4`, `axn`, `animalplanet`,
+`viasat3`, `moziverzum`, `amc`, `rtlgold`, `izauratv`, `prime`). So two registry channels that are
+plainly the same channel feed one walk each, and one of them is the loser. That, not the 3.3 %, is where
+the row loss a real operator sees comes from, and it is a matching problem (HOU-43) rather than
+something this rule should decide.
+
+**What is not lost** is coverage: every source channel's programmes stay inside that channel's own span,
+and the served guide is the raw span minus these overlaps. Nothing is corrupted — every served programme
+belongs to a declared channel and the DVR sees a coherent schedule. What is lost is entries, silently:
+no log line, no counter and no UI surface. Recorded as a known consequence rather than a defect: a
+source that publishes overlapping entries is a low-quality source, and an operator who dislikes what it
+publishes should choose a better XMLTV. Making the loss **visible** — a per-source drop count next to
+`programmeCount` — is tracked separately (HOU-37), and dropping exact duplicate slots before the walk is
+the one cheap rule change that needs no judgement about which entry to keep (HOU-35).
+
+**Decisions taken here, and what was parked.** *Taken:* the rule stays as it is and this document is the
+answer (**A**) — a source that competes with itself is a low-quality source, and its twin case loses only
+one of two title styles for a slot it still fills. *Parked as their own cards:* dropping exact duplicate
+slots before the walk (**B**, HOU-35 — the one case where doing nothing needs no judgement), a per-source
+tie-break preferring the longer or richer entry (**C**, HOU-36 — invasive, it adds a second rule and picks
+a winner the operator never chose), counting the drops and showing them next to `programmeCount` (**D**,
+HOU-37), and reusing the exclusion list to silence one bad channel id (**E**, HOU-38). *Rejected:* nothing
+here; B and D are expected to be taken, C only if asked for.
+
 ### 6.4 Emitted channel id and its stability
 
 - The emitted XMLTV channel id is the **M3U `tvg-id`** when the playlist is the channel authority,

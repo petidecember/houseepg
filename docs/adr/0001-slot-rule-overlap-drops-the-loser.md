@@ -65,3 +65,9 @@ winning source.
 
 - The same rule applies to pass-through (unmatched) channels, which have no priority competition at
   all.
+- The rule also applies **inside one source**. The walk compares slots and source order only, so when one
+  source channel publishes overlapping entries, the earlier one wins and the later is dropped whole, with
+  no tie-break available. That is deliberate: the order is the file's declaration order, and an operator who
+  dislikes what such a source publishes should pick a better XMLTV. It is written up with the measured cost
+  in design §6.3, "One source competing with itself"; making the drop count visible (HOU-37) and dropping
+  exact duplicate slots (HOU-35) are tracked separately.
