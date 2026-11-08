@@ -1,6 +1,7 @@
 package com.anti.houseepg;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.anti.houseepg.application.guide.GuideSettings;
 import com.anti.houseepg.application.guide.RefreshGuide;
@@ -52,7 +53,7 @@ class MongoPersistenceIntegrationTest {
 
     private static final EpgSource A = EpgSource.of("a", "Source A", "fixture:a", null, Duration.ofHours(8));
 
-    private final MongoGuideStore guideStore = new MongoGuideStore(DB);
+    private final MongoGuideStore guideStore = new MongoGuideStore(DB, CLIENT.getDatabase("admin"));
     private final MongoChannelMatchStore matchStore = new MongoChannelMatchStore(DB);
     private final Map<String, SourceEpg> documents = new LinkedHashMap<>();
     private final AtomicBoolean aFails = new AtomicBoolean();
@@ -116,6 +117,54 @@ class MongoPersistenceIntegrationTest {
 
         assertThat(serveGuide.current().guide().programmes()).extracting(programme -> programme.title())
                 .containsExactly("Show Alpha");
+    }
+
+    @Test
+    void aRegistryWriteThatCannotCompleteLeavesTheStoredRegistryAlone() {
+        guideStore.saveRegistry(List.of(playlistChannel("amc.xx", "AMC"), playlistChannel("bravo.xx", "Bravo")));
+
+        // The store keeps one row per id, so a duplicate id cannot be written at all. What matters is that
+        // the refused write did not first delete what was there (design §6.4, HOU-32).
+        assertThatThrownBy(() -> guideStore.saveRegistry(List.of(
+                playlistChannel("amc.xx", "AMC"), playlistChannel("amc.xx", "AMC HD"))))
+                .isInstanceOf(RuntimeException.class);
+
+        assertThat(guideStore.registry()).extracting(channel -> channel.id().value())
+                .containsExactlyInAnyOrder("amc.xx", "bravo.xx");
+    }
+
+    @Test
+    void aStagingCollectionLeftBehindByACrashDoesNotBleedIntoTheNextRegistry() {
+        // A process that dies between filling the staging collection and the rename cannot leave a partial
+        // registry, but it can leave the staging collection populated. The next write must not inherit it.
+        DB.getCollection("canonicalChannels_next")
+                .insertOne(new Document("_id", "ghost.xx").append("displayName", "Ghost"));
+
+        guideStore.saveRegistry(List.of(playlistChannel("amc.xx", "AMC")));
+
+        assertThat(guideStore.registry()).extracting(channel -> channel.id().value())
+                .containsExactly("amc.xx");
+        assertThat(DB.getCollection("canonicalChannels_next").countDocuments()).isZero();
+    }
+
+    @Test
+    void aSourceThatDeclaresOneIdTwiceStillSeedsEveryDistinctChannel() {
+        documents.put("a", new SourceEpg(A.id(), List.of(
+                new SourceChannel("AMC", "AMC", null),
+                new SourceChannel("Bravo", "Bravo", null),
+                new SourceChannel("AMC", "AMC H.265", null)),
+                List.of(programme("AMC", 1, 2, "Show Alpha"))));
+
+        // No playlist: the top-priority source seeds the registry (design §6.4, ADR-0002).
+        GuideSettings settings = new GuideSettings(List.of(A), Optional.empty(), Duration.ofDays(7));
+        new RefreshGuide(settings, this::read, location -> List.of(), matchStore, guideStore).refresh();
+
+        assertThat(guideStore.registry()).extracting(channel -> channel.id().value())
+                .containsExactly("AMC", "Bravo");
+        assertThat(DB.getCollection("canonicalChannels").countDocuments()).isEqualTo(2);
+        assertThat(DB.getCollection("canonicalChannels_next").countDocuments())
+                .as("the staging collection is renamed away, not left behind")
+                .isZero();
     }
 
     @Test

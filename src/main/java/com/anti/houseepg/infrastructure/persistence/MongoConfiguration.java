@@ -19,4 +19,13 @@ public class MongoConfiguration {
             @Value("${houseepg.mongodb.database:houseepg}") String database) {
         return client.getDatabase(database);
     }
+
+    /**
+     * The {@code admin} database of the same client: switching the registry's collection in one step uses
+     * {@code renameCollection}, which MongoDB refuses to run anywhere else (design §7, HOU-32).
+     */
+    @Bean
+    MongoDatabase houseEpgAdminDatabase(MongoClient client) {
+        return client.getDatabase("admin");
+    }
 }

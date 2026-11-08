@@ -96,6 +96,41 @@ class RefreshGuideTest {
             """;
 
     /**
+     * A provider that names one channel id twice: the HD and the H.265 variant are separate declarations
+     * with separate display names but a single id, which is what the live {@code live-hutv} feed does for
+     * 43 of its channels.
+     */
+    private static final String SOURCE_REPEATING = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <tv source-info-name="Repeating">
+              <channel id="CH1"><display-name>Channel One HD</display-name></channel>
+              <channel id="CH2"><display-name>Channel Two</display-name></channel>
+              <channel id="CH1"><display-name>Channel One H.265</display-name></channel>
+              <channel id="CH3"><display-name>Channel Three</display-name></channel>
+              <programme start="20261029200000 +0000" stop="20261029203000 +0000" channel="CH1">
+                <title>Show Alpha</title>
+              </programme>
+              <programme start="20261029200000 +0000" stop="20261029210000 +0000" channel="CH2">
+                <title>Film Beta</title>
+              </programme>
+              <programme start="20261029210000 +0000" stop="20261029220000 +0000" channel="CH3">
+                <title>Show Delta</title>
+              </programme>
+            </tv>
+            """;
+
+    /** A playlist naming one {@code tvg-id} twice — the shape the supplied playlist actually has. */
+    private static final String PLAYLIST_WITH_REPEATS = """
+            #EXTM3U
+            #EXTINF:-1 tvg-id="ch1.xx" tvg-name="Channel One",Channel One HD
+            http://example.invalid/ch1
+            #EXTINF:-1 tvg-id="ch1.xx" tvg-name="Channel One UHD",Channel One UHD
+            http://example.invalid/ch1-uhd
+            #EXTINF:-1 tvg-id="ch2.xx" tvg-name="Channel Two",Channel Two HD
+            http://example.invalid/ch2
+            """;
+
+    /**
      * The fixtures above end between 2026-10-29T19:45Z and 2026-10-29T23:00Z, and a refresh prunes every
      * programme that ended before {@code now - retention} (7 days). Driving it with the wall clock drops
      * the whole fixture set once that date ages out of the window, which is how this test went red from
@@ -123,6 +158,8 @@ class RefreshGuideTest {
             respond(exchange, 200, PLAYLIST);
         });
         server.createContext("/a.xml", exchange -> respond(exchange, 200, SOURCE_A));
+        server.createContext("/repeating.xml", exchange -> respond(exchange, 200, SOURCE_REPEATING));
+        server.createContext("/dup-playlist.m3u", exchange -> respond(exchange, 200, PLAYLIST_WITH_REPEATS));
         server.createContext("/b.xml.gz", exchange -> {
             if (sourceBFails.get()) {
                 respond(exchange, 503, "unavailable");
@@ -257,6 +294,34 @@ class RefreshGuideTest {
     }
 
     @Test
+    void aSourceThatNamesOneIdTwiceStillSeedsEveryDistinctChannel() {
+        // The live live-hutv feed declares 133 distinct ids across 178 declarations; the store writes one
+        // row per id, so a repeat used to abort the seed and freeze the registry at however many rows came
+        // first (HOU-32).
+        RefreshResult result = refreshGuide("/repeating.xml", Optional.empty()).refresh();
+
+        assertThat(guideStore.registry()).extracting(channel -> channel.id().value())
+                .containsExactly("CH1", "CH2", "CH3");
+        assertThat(guideStore.registry()).filteredOn(channel -> channel.id().value().equals("CH1"))
+                .singleElement()
+                .satisfies(channel -> assertThat(channel.displayName()).isEqualTo("Channel One HD"));
+        assertThat(result.guide().channels()).extracting(channel -> channel.id().value())
+                .containsExactlyInAnyOrder("CH1", "CH2", "CH3");
+    }
+
+    @Test
+    void aPlaylistThatNamesOneIdTwiceStillSeedsEveryDistinctChannel() {
+        // Same exposure through the other authority: a playlist's tvg-ids become the emitted ids, and the
+        // supplied playlist names one of them twice on its second line (HOU-32).
+        RefreshResult result = refreshGuide("/a.xml", Optional.of(base + "/dup-playlist.m3u")).refresh();
+
+        assertThat(guideStore.registry()).extracting(channel -> channel.id().value())
+                .containsExactly("ch1.xx", "ch2.xx");
+        assertThat(result.guide().channels()).filteredOn(channel -> channel.id().value().equals("ch1.xx"))
+                .singleElement()
+                .satisfies(channel -> assertThat(channel.origin()).isEqualTo(Channel.Origin.PLAYLIST));
+    }
+    @Test
     void aMisconfiguredSourceFailsInsteadOfBreakingTheGuide() {
         String localBase = base;
         GuideSettings settings = new GuideSettings(
@@ -272,6 +337,13 @@ class RefreshGuideTest {
         assertThat(result.health()).extracting(SourceHealth::state)
                 .containsExactly(SourceHealth.State.OK, SourceHealth.State.FAILED);
         assertThat(result.guide().programmes()).isNotEmpty();
+    }
+
+
+    private RefreshGuide refreshGuide(String url, Optional<String> playlistLocation) {
+        GuideSettings settings = new GuideSettings(
+                List.of(EpgSource.of("a", "Source A", base + url, Credentials.none())), playlistLocation);
+        return refreshGuide(settings);
     }
 
     private ServeGuide serveGuide(Optional<String> playlistLocation, boolean withBothSources) {

@@ -36,6 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 /** Adapter: the three persistence layers in MongoDB, one collection per layer (design §7). */
@@ -54,10 +55,18 @@ public class MongoGuideStore implements GuideStore {
     private static final Logger log = LoggerFactory.getLogger(MongoGuideStore.class);
 
     private final MongoDatabase database;
+    private final MongoDatabase admin;
     private final AtomicBoolean indexesEnsured = new AtomicBoolean();
 
-    public MongoGuideStore(MongoDatabase database) {
+    /**
+     * @param database the guide's own database
+     * @param admin the same server's {@code admin} database, because {@code renameCollection} — the one-step
+     *     swap {@link #saveRegistry} uses — is an admin command (design §7, HOU-32)
+     */
+    public MongoGuideStore(@Qualifier("houseEpgDatabase") MongoDatabase database,
+            @Qualifier("houseEpgAdminDatabase") MongoDatabase admin) {
         this.database = database;
+        this.admin = admin;
     }
 
     /**
@@ -234,7 +243,6 @@ public class MongoGuideStore implements GuideStore {
     @Override
     public void saveRegistry(List<Channel> channels) {
         ensureIndexes();
-        collection(CANONICAL_CHANNELS).deleteMany(new Document());
         List<Document> rows = channels.stream()
                 .map(channel -> new Document("_id", channel.id().value())
                         .append("displayName", channel.displayName())
@@ -242,9 +250,22 @@ public class MongoGuideStore implements GuideStore {
                         .append("number", channel.number())
                         .append("origin", channel.origin().name()))
                 .toList();
-        if (!rows.isEmpty()) {
-            collection(CANONICAL_CHANNELS).insertMany(rows);
+        if (rows.isEmpty()) {
+            collection(CANONICAL_CHANNELS).deleteMany(new Document());
+            return;
         }
+        // Built beside the live collection and swapped in, so a rejected row cannot leave the registry
+        // half-written: the old one keeps serving until the new one is complete. A plain delete-then-insert
+        // would already have dropped it by the time the write failed (design §6.4, ADR-0002).
+        String staging = CANONICAL_CHANNELS + "_next";
+        MongoCollection<Document> next = collection(staging);
+        next.deleteMany(new Document());
+        next.insertMany(rows);
+        // renameCollection is an admin command even when both collections live in this database.
+        MongoDatabase commandTarget = admin != null ? admin : database;
+        commandTarget.runCommand(new Document("renameCollection", database.getName() + "." + staging)
+                .append("to", database.getName() + "." + CANONICAL_CHANNELS)
+                .append("dropTarget", true));
     }
 
     @Override

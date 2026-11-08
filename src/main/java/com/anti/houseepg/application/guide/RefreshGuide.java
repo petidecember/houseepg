@@ -13,6 +13,7 @@ import com.anti.houseepg.domain.guide.model.SourceHealth;
 import com.anti.houseepg.domain.guide.model.SourceId;
 import com.anti.houseepg.domain.guide.model.SourceProgramme;
 import com.anti.houseepg.domain.guide.policy.ChannelMatch;
+import com.anti.houseepg.domain.guide.policy.ChannelDeclarations;
 import com.anti.houseepg.domain.guide.policy.ChannelMatching;
 import com.anti.houseepg.domain.guide.policy.PriorityMerge;
 import com.anti.houseepg.domain.guide.policy.SourceChannelRef;
@@ -25,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,6 +39,14 @@ import org.slf4j.LoggerFactory;
  * unhealthy, and the materialized guide keeps serving what it had.
  */
 public class RefreshGuide {
+
+    /**
+     * A stored registry that the primary source declares past is the signature of the old seed's truncation
+     * (HOU-32): the ids exist upstream but never landed, so nothing was ever attached to them. Said once per
+     * process, with the remedy, because the condition persists until an operator acts and a scheduler tick
+     * would otherwise repeat it every minute.
+     */
+    private final AtomicBoolean shortRegistryReported = new AtomicBoolean();
 
     private static final Logger log = LoggerFactory.getLogger(RefreshGuide.class);
 
@@ -195,19 +205,59 @@ public class RefreshGuide {
         if (location.isPresent()) {
             List<Channel> fromPlaylist = readPlaylist(location.get());
             if (!fromPlaylist.isEmpty()) {
-                store.saveRegistry(fromPlaylist);
-                return fromPlaylist;
+                List<Channel> authoritative = collapsed(fromPlaylist, "the playlist");
+                store.saveRegistry(authoritative);
+                return authoritative;
             }
             return stored;
         }
         if (!stored.isEmpty()) {
+            reportShortRegistry(stored, documents);
             return stored;
         }
-        List<Channel> seeded = seedFromPrimarySource(documents);
+        List<Channel> seeded = collapsed(seedFromPrimarySource(documents), "the primary source");
         if (!seeded.isEmpty()) {
             store.saveRegistry(seeded);
         }
         return seeded;
+    }
+
+    /**
+     * Names a stored registry that the primary source declares past, once per process. Ids missing from the
+     * registry are emitted only as pass-through and can never be matched, so the review list fills with rows
+     * that describe a truncated seed rather than a matcher failure (HOU-32).
+     */
+    private void reportShortRegistry(List<Channel> stored, List<SourceEpg> documents) {
+        if (shortRegistryReported.getAndSet(true)) {
+            return;
+        }
+        List<Channel> declared = collapsed(seedFromPrimarySource(documents), "the primary source");
+        List<ChannelId> missing = ChannelDeclarations.missingFrom(stored, declared);
+        if (missing.isEmpty()) {
+            return;
+        }
+        log.warn("The stored registry holds {} channel(s) while the primary source declares {}; {} id(s) "
+                + "cannot be matched until it is re-seeded: {}. Re-seed with POST /api/registry/reseed "
+                + "(preview it with GET first): emitted ids may change and a DVR mapping may need redoing",
+                stored.size(), declared.size(), missing.size(), missing);
+    }
+
+    /**
+     * Resolves the declaration list to one entry per id, and says out loud what it dropped: a provider that
+     * repeats itself used to shrink the registry silently, because the store's write failed on the repeat.
+     */
+    private static List<Channel> collapsed(List<Channel> declared, String authority) {
+        ChannelDeclarations.Collapse collapse = ChannelDeclarations.distinctById(declared);
+        if (collapse.collapsedAnything()) {
+            log.warn("{} declares {} channel id(s) more than once ({}); keeping the first declaration of each, "
+                    + "so {} declaration(s) become {} channel(s)", authority, distinctIds(collapse.duplicates()),
+                    collapse.duplicates(), declared.size(), collapse.channels().size());
+        }
+        return collapse.channels();
+    }
+
+    private static List<ChannelId> distinctIds(List<ChannelId> ids) {
+        return ids.stream().distinct().toList();
     }
 
     private List<Channel> readPlaylist(String location) {

@@ -23,6 +23,7 @@ import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 /** Adapter: channel matches in MongoDB, unique per (source, source channel id); durable since HOU-5. */
@@ -36,7 +37,7 @@ public class MongoChannelMatchStore implements ChannelMatchStore {
     private final MongoDatabase database;
     private final AtomicBoolean indexesEnsured = new AtomicBoolean();
 
-    public MongoChannelMatchStore(MongoDatabase database) {
+    public MongoChannelMatchStore(@Qualifier("houseEpgDatabase") MongoDatabase database) {
         this.database = database;
     }
 
