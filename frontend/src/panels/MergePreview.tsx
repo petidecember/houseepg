@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
+import { channelLabel } from '../channelLabel';
 import type {
   Channel,
   MergePreview as PreviewPayload,
@@ -135,8 +136,8 @@ export function MergePreview({
           channel
           <select value={selected ?? ''} onChange={(event) => setSelected(event.target.value)}>
             {channels.map((channel) => (
-              <option key={channel.id} value={channel.id}>
-                {channel.name} ({channel.id})
+              <option key={channel.id} value={channel.id} title={channel.id}>
+                {channelLabel(channel)}
               </option>
             ))}
           </select>

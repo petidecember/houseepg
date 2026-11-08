@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import { channelLabel } from '../channelLabel';
 import { useLoader } from '../useLoader';
 import type { Programme, Timeline } from '../types';
 
@@ -70,8 +71,8 @@ export function GuidePanel() {
           Channel{' '}
           <select value={selected ?? ''} onChange={(event) => setSelected(event.target.value)}>
             {channels.map((channel) => (
-              <option key={channel.id} value={channel.id}>
-                {channel.name} ({channel.id})
+              <option key={channel.id} value={channel.id} title={channel.id}>
+                {channelLabel(channel)}
               </option>
             ))}
           </select>
