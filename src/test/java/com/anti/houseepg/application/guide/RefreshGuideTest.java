@@ -31,7 +31,10 @@ import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -91,6 +94,15 @@ class RefreshGuideTest {
               </programme>
             </tv>
             """;
+
+    /**
+     * The fixtures above end between 2026-10-29T19:45Z and 2026-10-29T23:00Z, and a refresh prunes every
+     * programme that ended before {@code now - retention} (7 days). Driving it with the wall clock drops
+     * the whole fixture set once that date ages out of the window, which is how this test went red from
+     * 2026-11-05. Pinning an instant inside the fixtures' window keeps the assertions meaningful on any
+     * date; HOU-20 fixed the same shape in {@code ProviderSamplesTest}.
+     */
+    private static final Instant FIXTURE_NOW = Instant.parse("2026-10-29T20:00:00Z");
 
     private HttpServer server;
     private final AtomicBoolean sourceBFails = new AtomicBoolean(false);
@@ -280,7 +292,7 @@ class RefreshGuideTest {
                 new HouseEpgProperties(null, List.of(), Duration.ofDays(7), Duration.ofSeconds(10));
         HttpFetcher fetcher = new HttpFetcher(properties);
         return new RefreshGuide(settings, new HttpEpgSourceGateway(fetcher, new XmltvReader(), guideStore),
-                new M3uChannelAuthority(fetcher), matchStore, guideStore);
+                new M3uChannelAuthority(fetcher), matchStore, guideStore, Clock.fixed(FIXTURE_NOW, ZoneOffset.UTC));
     }
 
     private static void respond(HttpExchange exchange, int status, String body) throws IOException {

@@ -21,6 +21,7 @@ import com.anti.houseepg.application.guide.port.Credentials;
 import com.anti.houseepg.application.guide.port.EpgSource;
 import com.anti.houseepg.application.guide.port.EpgSourceGateway;
 import com.anti.houseepg.application.guide.port.GuideStore;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -44,10 +45,21 @@ public class HouseEpgConfiguration {
                 Optional.ofNullable(properties.playlistUrl()), properties.retention());
     }
 
+    /**
+     * The clock the refresh prunes against. A bean rather than {@code Clock.systemUTC()} inline, so a test
+     * can pin the instant: retention drops every programme that ended before {@code now - retention},
+     * which silently empties a fixture set once its dates age out of the window (HOU-29).
+     */
+    @Bean
+    Clock clock() {
+        return Clock.systemUTC();
+    }
+
     @Bean
     RefreshGuide refreshGuide(GuideSettings settings, EpgSourceGateway epgSources,
-            ChannelAuthorityGateway channelAuthority, ChannelMatchStore matchStore, GuideStore guideStore) {
-        return new RefreshGuide(settings, epgSources, channelAuthority, matchStore, guideStore);
+            ChannelAuthorityGateway channelAuthority, ChannelMatchStore matchStore, GuideStore guideStore,
+            Clock clock) {
+        return new RefreshGuide(settings, epgSources, channelAuthority, matchStore, guideStore, clock);
     }
 
     @Bean

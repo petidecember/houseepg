@@ -15,10 +15,16 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
@@ -90,6 +96,29 @@ class FeedIntegrationTest {
         return CLIENT.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
     }
 
+    /**
+     * Pins the fixture window for this suite. The stub fixtures above are dated 2026-10-29, and retention
+     * drops everything that ended before {@code now - 7 days}, so on the wall clock this suite empties its
+     * own fixtures once that date ages out of the window (HOU-29). The instant sits inside the fixtures'
+     * window; {@code @Primary} is what makes it win over the application's {@code Clock.systemUTC()}
+     * without colliding with the other {@code @SpringBootTest} in this source set.
+     */
+    @TestConfiguration
+    static class FixtureClock {
+
+        private static final Instant FIXTURE_NOW = Instant.parse("2026-10-29T20:00:00Z");
+
+        /**
+         * A clock rather than {@code Clock.systemUTC()} inline, so a test can pin the instant — the seam
+         * HOU-20 introduced on {@link RefreshGuide}, applied through the Spring wiring here.
+         */
+        @Bean
+        @Primary
+        Clock fixtureClock() {
+            return Clock.fixed(FIXTURE_NOW, ZoneOffset.UTC);
+        }
+    }
+
     private static String fixture(String path) {
         try (InputStream input = FeedIntegrationTest.class.getResourceAsStream(path)) {
             if (input == null) {
@@ -137,3 +166,4 @@ class FeedIntegrationTest {
         }
     }
 }
+
