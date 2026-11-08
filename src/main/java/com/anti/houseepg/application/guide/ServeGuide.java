@@ -30,6 +30,7 @@ public class ServeGuide {
     }
 
     private RefreshResult current(StoredGuide stored) {
-        return new RefreshResult(stored.guide(), store.health(), stored.materializedAt(), matchStore.decisions());
+        return new RefreshResult(stored.guide(), store.health(), stored.materializedAt(),
+                matchStore.decisions(), store.slotLosses());
     }
 }

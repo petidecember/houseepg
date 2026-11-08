@@ -91,6 +91,39 @@ class FeedIntegrationTest {
                 .contains("\"sourceId\":\"a\"", "\"sourceId\":\"b\"", "\"state\":\"OK\"");
     }
 
+    @Test
+    void reportsWhatTheSlotRuleDroppedAndFromWhichClass() throws Exception {
+        // Fixture B ships an entry that loses to A's higher priority (its "Show Alpha" overlaps A's) and one
+        // that loses to another entry of its own ("Film Gamma" covers "Show Alpha"). Neither is mentioned in
+        // the served feed, so this endpoint is the only place an operator can see the loss at all.
+        String b = statusOf("b", get("/api/sources/status").body());
+
+        int dropped = number(b, "dropped");
+        assertThat(dropped).isGreaterThan(0);
+        assertThat(number(b, "duplicateSlots") + number(b, "partialOverlaps")
+                + number(b, "lostToHigherPriority")).isEqualTo(dropped);
+        assertThat(number(statusOf("a", get("/api/sources/status").body()), "dropped")).isZero();
+    }
+
+    /** The JSON object for one source, so a per-source field cannot be read off another source's row. */
+    private static String statusOf(String sourceId, String body) {
+        int start = body.indexOf("{\"sourceId\":\"" + sourceId + "\"");
+        assertThat(start).as("status for %s in %s", sourceId, body).isNotNegative();
+        return body.substring(start, body.indexOf('}', start) + 1);
+    }
+
+    /** Reads an integer field out of one source's JSON object without pulling in a JSON library. */
+    private static int number(String json, String field) {
+        int at = json.indexOf("\"" + field + "\":");
+        assertThat(at).as("%s in %s", field, json).isNotNegative();
+        int digitsFrom = at + field.length() + 3;
+        int digitsTo = digitsFrom;
+        while (digitsTo < json.length() && Character.isDigit(json.charAt(digitsTo))) {
+            digitsTo++;
+        }
+        return Integer.parseInt(json.substring(digitsFrom, digitsTo));
+    }
+
     private HttpResponse<String> get(String path) throws Exception {
         HttpRequest request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path)).GET().build();
         return CLIENT.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));

@@ -4,6 +4,7 @@ import com.anti.houseepg.domain.guide.model.Channel;
 import com.anti.houseepg.domain.guide.model.ChannelId;
 import com.anti.houseepg.domain.guide.model.Guide;
 import com.anti.houseepg.domain.guide.model.RawSnapshot;
+import com.anti.houseepg.domain.guide.model.SlotLoss;
 import com.anti.houseepg.domain.guide.model.SourceEpg;
 import com.anti.houseepg.domain.guide.model.SourceHealth;
 import com.anti.houseepg.domain.guide.model.SourceId;
@@ -46,6 +47,14 @@ public interface GuideStore {
     List<SourceHealth> health();
 
     void saveHealth(SourceHealth health);
+
+    /**
+     * The slot rule's losses from the last refresh, per source. Reported by {@code /api/sources/status}
+     * (design §6.3), so an operator can see a source being eaten instead of only a low programme count.
+     */
+    SlotLoss.BySource slotLosses();
+
+    void saveSlotLosses(SlotLoss.BySource losses);
 
     /** Retention: drops normalized programmes that ended before {@code before}. */
     void prune(Instant before);

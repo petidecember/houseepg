@@ -32,7 +32,10 @@ public class FeedController {
 
     @GetMapping("/api/sources/status")
     public List<SourceHealthResponse> sourceStatus() {
-        return serveGuide.current().health().stream().map(SourceHealthResponse::from).toList();
+        RefreshResult current = serveGuide.current();
+        return current.health().stream()
+                .map(health -> SourceHealthResponse.from(health, current.slotLosses().of(health.source())))
+                .toList();
     }
 
     /** Manual "refresh now" for one source (design §8); 404 when no such source is configured. */
@@ -46,7 +49,7 @@ public class FeedController {
         return result.health().stream()
                 .filter(health -> health.source().equals(source))
                 .findFirst()
-                .map(SourceHealthResponse::from)
+                .map(health -> SourceHealthResponse.from(health, result.slotLosses().of(source)))
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }

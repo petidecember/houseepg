@@ -246,12 +246,37 @@ the one cheap rule change that needs no judgement about which entry to keep (HOU
 
 **Decisions taken here, and what was parked.** *Taken:* the rule stays as it is and this document is the
 answer (**A**) — a source that competes with itself is a low-quality source, and its twin case loses only
-one of two title styles for a slot it still fills. *Parked as their own cards:* dropping exact duplicate
-slots before the walk (**B**, HOU-35 — the one case where doing nothing needs no judgement), a per-source
-tie-break preferring the longer or richer entry (**C**, HOU-36 — invasive, it adds a second rule and picks
-a winner the operator never chose), counting the drops and showing them next to `programmeCount` (**D**,
-HOU-37), and reusing the exclusion list to silence one bad channel id (**E**, HOU-38). *Rejected:* nothing
-here; B and D are expected to be taken, C only if asked for.
+one of two title styles for a slot it still fills. *Taken, later:* counting the drops and showing them next
+to `programmeCount` (**D**, landed as HOU-37 — see the fold below), because an invisible loss cannot be
+judged by an operator at all. *Parked as their own cards:* dropping exact duplicate slots before the walk
+(**B**, HOU-35 — the one case where doing nothing needs no judgement), a per-source tie-break preferring
+the longer or richer entry (**C**, HOU-36 — invasive, it adds a second rule and picks a winner the
+operator never chose), and reusing the exclusion list to silence one bad channel id (**E**, HOU-38).
+*Rejected:* nothing here; C only if asked for.
+
+**Every loss is counted, because nothing else records it.** A dropped entry is emitted nowhere: no XMLTV
+element, no log line, no row. So the same walk that decides the losses also folds them per source and
+splits them three ways, and `/api/sources/status` reports the result (HOU-37). The classes are the
+operator's lever, because each points at a different action:
+
+| Class | What it means | What the operator can do |
+| --- | --- | --- |
+| `duplicateSlots` | the same slot was claimed byte-for-byte by an earlier entry of the same source | the provider is shipping an entry twice; nothing to decide |
+| `partialOverlaps` | an earlier entry of the same source overlapped it | the provider is publishing a nested or overlapping pair; this is the class with no tie-break and the place a per-source rule would help (HOU-36) |
+| `lostToHigherPriority` | another source's entry claimed an overlapping slot first | the slot rule working as intended; reorder if the wrong source is winning |
+
+The fold lives inside the walk rather than in a controller for one reason: the merge preview (§6.6)
+reports the same losses for one window, and two independent counters would eventually disagree. A source
+that lost nothing reports zero, not an absent row, so "this source is being eaten" is answerable at a
+glance without opening the preview. An entry whose channel matched nothing never reaches the rule and is
+therefore not counted — the loss classes describe the rule's decisions, not publisher quality.
+
+Losses are counted **one canonical channel at a time and then summed**, never by flattening every
+channel's walk into one list. An outcome's `conflictingEntry` is an index into the walk that produced it,
+so a flat list would make every channel after the first resolve its conflict against whichever entry sits
+at that offset in a different channel: the total would still add up, and the reason class would be wrong
+— a duplicate slot reported as a partial overlap. The totals agreeing is what makes this failure quiet,
+which is why the summing rule is written down here rather than left to the code.
 
 ### 6.4 Emitted channel id and its stability
 
@@ -479,7 +504,7 @@ application at a dedicated database.
 | `POST /api/registry/reseed` | Explicit re-seed: preview the emitted id changes, then apply them. The only way an id may change (ADR-0002). |
 | `GET /api/channels`, `PUT /api/matches/{id}` | Registry view; confirm/correct a match. |
 | `GET /api/sources` | The configured sources with their health. **Read-only**: sources are declared in YAML, never through the API (ADR-0005). |
-| `GET /api/sources/status` | Per-source health, last refresh, last error. |
+| `GET /api/sources/status` | Per-source health, last refresh, last error, and what the slot rule dropped for that source in the last refresh (`dropped` split into `duplicateSlots`, `partialOverlaps`, `lostToHigherPriority`, §6.3). |
 | `POST /api/sources/{id}/refresh` | Manual refresh. |
 | `GET /api/preview/{canonicalChannelId}` | Merged timeline with the winning source per slot. |
 | `GET /api/merge/{canonicalChannelId}?day=&from=&hours=&order=` | Per-provider merge breakdown for one channel over one window (§6.6). `order` overrides the applied priority, which is how the draft order is previewed; omitting it uses the applied order. A channel id no provider serves — not even as a pass-through channel — is a 404, because there is no breakdown to explain. |
@@ -489,7 +514,7 @@ These endpoints exist to serve the UI. They are not a supported JSON API.
 ## 10. Web UI (React)
 
 Drag-to-reorder priority · channel auto-match review (confirm/correct) · registry view ·
-per-source health and last refresh · manual refresh now · "reload config" · "dump config to log" ·
+per-source health, last refresh and what the slot rule dropped (§6.3) · manual refresh now · "reload config" · "dump config to log" ·
 merged-guide preview per channel **showing the winning source per slot** · guide viewer ·
 **merge preview** on the Priority page — one channel, providers in draft order, each entry's fate
 (§6.6).

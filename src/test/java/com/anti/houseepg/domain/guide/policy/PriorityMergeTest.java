@@ -7,6 +7,7 @@ import com.anti.houseepg.domain.guide.model.ChannelId;
 import com.anti.houseepg.domain.guide.model.Guide;
 import com.anti.houseepg.domain.guide.model.Programme;
 import com.anti.houseepg.domain.guide.model.Slot;
+import com.anti.houseepg.domain.guide.model.SlotLoss;
 import com.anti.houseepg.domain.guide.model.SourceChannel;
 import com.anti.houseepg.domain.guide.model.SourceEpg;
 import com.anti.houseepg.domain.guide.model.SourceId;
@@ -97,6 +98,88 @@ class PriorityMergeTest {
         Guide guide = merge(List.of(B), source(B, "ch3", programme("ghost", "22:00", "23:00", "Orphan", null)));
 
         assertThat(guide.programmes()).isEmpty();
+    }
+
+    @Test
+    void countsTheLossesTheServedGuideDoesNotMention() {
+        // A ships the 20:00 slot twice and B overlaps it, so three entries compete and two are dropped.
+        SourceEpg a = source(A, "CH1",
+                programme("CH1", "20:00", "21:00", "Show Alpha", null),
+                programme("CH1", "20:00", "21:00", "Show Alpha", null),
+                programme("CH1", "22:00", "23:00", "Show Beta", null));
+        SourceEpg b = source(B, "CH1 (HD)",
+                programme("CH1 (HD)", "20:30", "21:30", "Show Alpha", "Short synopsis"));
+        ChannelMatching.Match match = ChannelMatching.match(REGISTRY, List.of(a, b));
+
+        SlotLoss.BySource losses = PriorityMerge.slotLosses(List.of(a, b), match.canonicalIds(),
+                List.of(A, B));
+
+        assertThat(losses.of(A).dropped()).isEqualTo(1);
+        assertThat(losses.of(A).duplicateSlots()).isEqualTo(1);
+        assertThat(losses.of(B).dropped()).isEqualTo(1);
+        assertThat(losses.of(B).lostToHigherPriority()).isEqualTo(1);
+        // The count must come from the same walk that built the served guide, not from a second one.
+        Guide served = PriorityMerge.merge(match.channels(), List.of(a, b), match.canonicalIds(),
+                List.of(A, B));
+        assertThat(served.programmes()).hasSize(2);
+    }
+
+    @Test
+    void aSourceThatLosesNothingReportsZero() {
+        SourceEpg a = source(A, "CH1", programme("CH1", "20:00", "21:00", "Show Alpha", null));
+        SourceEpg b = source(B, "CH1 (HD)", programme("CH1 (HD)", "21:00", "22:00", "Show Bravo", null));
+        ChannelMatching.Match match = ChannelMatching.match(REGISTRY, List.of(a, b));
+
+        SlotLoss.BySource losses = PriorityMerge.slotLosses(List.of(a, b), match.canonicalIds(),
+                List.of(A, B));
+
+        assertThat(losses.of(A).dropped()).isZero();
+        assertThat(losses.of(B).dropped()).isZero();
+    }
+
+    @Test
+    void thePreviewAndTheFeedCountTheSameLosses() {
+        // The anti-drift property of §6.6: the per-source total is a fold over the same walk that built
+        // the guide, so a preview and a feed that disagreed would fail here rather than in production.
+        SourceEpg a = source(A, "CH1",
+                programme("CH1", "20:00", "21:00", "Show Alpha", null),
+                programme("CH1", "20:30", "21:30", "Show Alpha", null),
+                programme("CH1", "22:00", "23:00", "Show Beta", null));
+        SourceEpg b = source(B, "CH1 (HD)",
+                programme("CH1 (HD)", "22:30", "23:30", "Show Beta", null));
+        List<SourceEpg> sources = List.of(a, b);
+        ChannelMatching.Match match = ChannelMatching.match(REGISTRY, sources);
+
+        Guide served = PriorityMerge.merge(match.channels(), sources, match.canonicalIds(), List.of(A, B));
+        SlotLoss.BySource losses = PriorityMerge.slotLosses(sources, match.canonicalIds(), List.of(A, B));
+
+        int declared = sources.stream().mapToInt(source -> source.programmes().size()).sum();
+        int dropped = losses.losses().values().stream().mapToInt(SlotLoss::dropped).sum();
+        assertThat(declared - dropped).isEqualTo(served.programmes().size());
+    }
+
+    @Test
+    void theReasonClassSurvivesMoreThanOneChannelInTheSameWalk() {
+        // A conflictingEntry index only means anything inside the walk that produced it. Counting every
+        // channel as one flattened walk makes each group after the first resolve its conflict against
+        // whichever entry sits at that offset in another channel, so a duplicate slot is misreported as a
+        // partial overlap. CH1 is the duplicate; CH2 is the group that used to corrupt it.
+        SourceEpg a = source(A, "CH1",
+                programme("CH1", "20:00", "21:00", "Show Alpha", null),
+                programme("CH1", "20:00", "21:00", "Show Alpha", null),
+                programme("CH1", "23:00", "23:59", "Show Zulu", null));
+        SourceEpg b = source(B, "CH2HD",
+                programme("CH2HD", "20:00", "21:00", "Film Beta", null),
+                programme("CH2HD", "20:00", "21:00", "Film Beta", null));
+        List<SourceEpg> sources = List.of(a, b);
+        ChannelMatching.Match match = ChannelMatching.match(REGISTRY, sources);
+
+        SlotLoss.BySource losses = PriorityMerge.slotLosses(sources, match.canonicalIds(), List.of(A, B));
+
+        assertThat(losses.of(A).duplicateSlots()).isEqualTo(1);
+        assertThat(losses.of(A).partialOverlaps()).isZero();
+        assertThat(losses.of(B).duplicateSlots()).isEqualTo(1);
+        assertThat(losses.of(B).partialOverlaps()).isZero();
     }
 
     private static Guide merge(List<SourceId> priority, SourceEpg... sources) {

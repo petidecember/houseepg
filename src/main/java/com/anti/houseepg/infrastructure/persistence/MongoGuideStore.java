@@ -12,6 +12,7 @@ import com.anti.houseepg.domain.guide.model.RawSnapshot;
 import com.anti.houseepg.domain.guide.model.Slot;
 import com.anti.houseepg.domain.guide.model.SourceChannel;
 import com.anti.houseepg.domain.guide.model.SourceEpg;
+import com.anti.houseepg.domain.guide.model.SlotLoss;
 import com.anti.houseepg.domain.guide.model.SourceHealth;
 import com.anti.houseepg.domain.guide.model.SourceId;
 import com.anti.houseepg.domain.guide.model.SourceProgramme;
@@ -50,6 +51,7 @@ public class MongoGuideStore implements GuideStore {
     static final String MERGED_PROGRAMMES = "mergedProgrammes";
     static final String GUIDE_MARKERS = "guideMarkers";
     static final String SOURCE_HEALTH = "sourceHealth";
+    static final String SOURCE_LOSSES = "sourceLosses";
     static final String GUIDE_MARKER_ID = "merged";
 
     private static final Logger log = LoggerFactory.getLogger(MongoGuideStore.class);
@@ -288,6 +290,37 @@ public class MongoGuideStore implements GuideStore {
                 .append("error", health.error());
         collection(SOURCE_HEALTH).replaceOne(eq("_id", document.get("_id")), document,
                 new ReplaceOptions().upsert(true));
+    }
+
+    @Override
+    public SlotLoss.BySource slotLosses() {
+        ensureIndexes();
+        Map<SourceId, SlotLoss> losses = new LinkedHashMap<>();
+        for (Document document : collection(SOURCE_LOSSES).find()) {
+            losses.put(new SourceId(document.getString("_id")),
+                    new SlotLoss(document.getInteger("dropped", 0),
+                            document.getInteger("duplicateSlots", 0),
+                            document.getInteger("partialOverlaps", 0),
+                            document.getInteger("lostToHigherPriority", 0)));
+        }
+        return new SlotLoss.BySource(losses);
+    }
+
+    @Override
+    public void saveSlotLosses(SlotLoss.BySource losses) {
+        ensureIndexes();
+        // Replaced whole: these describe the last refresh, so a source that stopped losing must stop
+        // being reported rather than keep its old count forever.
+        collection(SOURCE_LOSSES).deleteMany(new Document());
+        List<Document> rows = new ArrayList<>();
+        losses.losses().forEach((source, loss) -> rows.add(new Document("_id", source.value())
+                .append("dropped", loss.dropped())
+                .append("duplicateSlots", loss.duplicateSlots())
+                .append("partialOverlaps", loss.partialOverlaps())
+                .append("lostToHigherPriority", loss.lostToHigherPriority())));
+        if (!rows.isEmpty()) {
+            collection(SOURCE_LOSSES).insertMany(rows);
+        }
     }
 
     @Override

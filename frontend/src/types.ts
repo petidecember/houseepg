@@ -31,6 +31,11 @@ export type Health = {
   name: string;
   state: 'OK' | 'STALE' | 'FAILED';
   programmeCount: number;
+  /** Entries the slot rule dropped for this source last refresh (design §6.3). */
+  dropped: number;
+  duplicateSlots: number;
+  partialOverlaps: number;
+  lostToHigherPriority: number;
   error: string | null;
 };
 

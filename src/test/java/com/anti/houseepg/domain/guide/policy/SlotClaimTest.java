@@ -80,6 +80,53 @@ class SlotClaimTest {
         assertThat(claim.outcomes().get(0).conflictingEntry()).isEqualTo(1);
     }
 
+    @Test
+    void aSourceLosingToItselfIsCountedAsSelfOverlapAndOneLosingToAnotherIsNot() {
+        SlotClaimable ownShorter = entry(B, 20, 21);
+        SlotClaimable ownLonger = entry(B, 20, 22);
+        SlotClaimable beatenByA = entry(B, 22, 23);
+        SlotClaimable winsFromB = entry(A, 22, 24);
+        List<SlotClaimable> entries = List.of(ownShorter, ownLonger, beatenByA, winsFromB);
+        SlotClaim claim = SlotClaim.of(entries, List.of(A, B));
+
+        var losses = claim.lossesBySource(entries);
+
+        // B loses twice: its longer 20:00-22:00 to its own 20:00-21:00, and its 22:00-23:00 to A. The
+        // first has no tie-break available at all, the second is the rule working as intended.
+        assertThat(losses.of(B).dropped()).isEqualTo(2);
+        assertThat(losses.of(B).partialOverlaps()).isEqualTo(1);
+        assertThat(losses.of(B).lostToHigherPriority()).isEqualTo(1);
+        assertThat(losses.of(B).selfOverlap()).isTrue();
+        assertThat(losses.of(A).dropped()).isZero();
+    }
+
+    @Test
+    void anExactlyRepeatedSlotIsCountedApartFromAnOverlapInsideOneSource() {
+        // Same slot twice: a provider shipping an entry twice. Nothing decides this; it is a duplicate.
+        List<SlotClaimable> entries = List.of(entry(A, 20, 21), entry(A, 20, 21), entry(A, 23, 24),
+                entry(A, 23, 25));
+        SlotClaim claim = SlotClaim.of(entries, List.of(A));
+
+        var losses = claim.lossesBySource(entries);
+
+        assertThat(losses.of(A).dropped()).isEqualTo(2);
+        assertThat(losses.of(A).duplicateSlots()).isEqualTo(1);
+        assertThat(losses.of(A).partialOverlaps()).isEqualTo(1);
+        assertThat(losses.of(A).lostToHigherPriority()).isZero();
+    }
+
+    @Test
+    void aSourceOutsideTheOrderIsNotCountedAsALoss() {
+        List<SlotClaimable> entries = List.of(entry(A, 20, 21), entry(B, 20, 21));
+        SlotClaim claim = SlotClaim.of(entries, List.of(A));
+
+        var losses = claim.lossesBySource(entries);
+
+        assertThat(claim.outcomes()).extracting(SlotClaim.Outcome::fate)
+                .containsExactly(SlotClaim.Fate.WON, SlotClaim.Fate.EXCLUDED);
+        assertThat(losses.of(B).dropped()).isZero();
+    }
+
     private static SlotClaimable entry(SourceId source, int startHour, int stopHour) {
         return new SlotClaimable(source, new Slot(at(startHour), at(stopHour)));
     }

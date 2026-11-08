@@ -5,6 +5,7 @@ import com.anti.houseepg.domain.guide.model.Channel;
 import com.anti.houseepg.domain.guide.model.ChannelId;
 import com.anti.houseepg.domain.guide.model.Guide;
 import com.anti.houseepg.domain.guide.model.RawSnapshot;
+import com.anti.houseepg.domain.guide.model.SlotLoss;
 import com.anti.houseepg.domain.guide.model.SourceEpg;
 import com.anti.houseepg.domain.guide.model.SourceHealth;
 import com.anti.houseepg.domain.guide.model.SourceId;
@@ -26,6 +27,7 @@ public class InMemoryGuideStore implements GuideStore {
     private final Map<SourceId, SourceHealth> health = new LinkedHashMap<>();
     private List<Channel> registry = List.of();
     private StoredGuide merged;
+    private SlotLoss.BySource slotLosses = SlotLoss.BySource.none();
 
     @Override
     public Optional<RawSnapshot> rawSnapshot(SourceId source) {
@@ -75,6 +77,16 @@ public class InMemoryGuideStore implements GuideStore {
     @Override
     public void saveHealth(SourceHealth status) {
         health.put(status.source(), status);
+    }
+
+    @Override
+    public SlotLoss.BySource slotLosses() {
+        return slotLosses;
+    }
+
+    @Override
+    public void saveSlotLosses(SlotLoss.BySource losses) {
+        this.slotLosses = losses;
     }
 
     @Override

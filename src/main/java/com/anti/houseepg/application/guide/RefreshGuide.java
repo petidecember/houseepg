@@ -9,6 +9,7 @@ import com.anti.houseepg.domain.guide.model.Channel;
 import com.anti.houseepg.domain.guide.model.ChannelId;
 import com.anti.houseepg.domain.guide.model.Guide;
 import com.anti.houseepg.domain.guide.model.SourceEpg;
+import com.anti.houseepg.domain.guide.model.SlotLoss;
 import com.anti.houseepg.domain.guide.model.SourceHealth;
 import com.anti.houseepg.domain.guide.model.SourceId;
 import com.anti.houseepg.domain.guide.model.SourceProgramme;
@@ -133,9 +134,14 @@ public class RefreshGuide {
         List<SourceId> priority = documents.stream().map(SourceEpg::source).toList();
         Guide guide = PriorityMerge.merge(match.channels(), documents, match.canonicalIds(), priority);
 
+        // What the walk dropped, from the walk itself, so the reported loss cannot disagree with the
+        // guide this same pass just built (design §6.3).
+        SlotLoss.BySource slotLosses = PriorityMerge.slotLosses(documents, match.canonicalIds(), priority);
+        store.saveSlotLosses(slotLosses);
+
         store.prune(cutoff);
         store.saveMergedGuide(guide, now);
-        return new RefreshResult(guide, health, now, match.matches());
+        return new RefreshResult(guide, health, now, match.matches(), slotLosses);
     }
 
     /** Design §7 retention: a programme that ended before the cutoff is not part of the guide at all. */

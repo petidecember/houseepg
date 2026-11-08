@@ -1,10 +1,13 @@
 package com.anti.houseepg.domain.guide.policy;
 
+import com.anti.houseepg.domain.guide.model.Slot;
+import com.anti.houseepg.domain.guide.model.SlotLoss;
 import com.anti.houseepg.domain.guide.model.SourceId;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -87,6 +90,43 @@ public record SlotClaim(List<SlotClaim.Outcome> outcomes) {
             outcomes[index] = new Outcome(Fate.WON, -1);
         }
         return new SlotClaim(List.of(outcomes));
+    }
+
+    /**
+     * Folds a walk's outcomes into what the sources that lost would want to know. The entries are the
+     * same list and the same order {@link #of} was given, so the owners come from them directly. Only
+     * losses are counted: a win is visible in the guide already.
+     */
+    public SlotLoss.BySource lossesBySource(List<SlotClaimable> entries) {
+        List<SlotClaimable> judged = entries == null ? List.of() : entries;
+        Map<SourceId, int[]> counts = new LinkedHashMap<>();
+        for (int index = 0; index < outcomes.size() && index < judged.size(); index++) {
+            Outcome outcome = outcomes.get(index);
+            if (outcome.fate() != Fate.LOST) {
+                continue;
+            }
+            int[] tally = counts.computeIfAbsent(judged.get(index).source(), key -> new int[3]);
+            tally[0]++;
+            if (outcome.conflictingEntry() < 0 || outcome.conflictingEntry() >= judged.size()) {
+                continue;
+            }
+            // Inside one source the walk has no tie-break available: the earlier entry wins because it
+            // got there first, not because anything decided it should. Whether the slots are equal
+            // separates a provider shipping an entry twice from one publishing a nested or overlapping
+            // pair — a different problem with a different answer.
+            if (judged.get(index).source().equals(judged.get(outcome.conflictingEntry()).source())) {
+                Slot winner = judged.get(outcome.conflictingEntry()).slot();
+                if (judged.get(index).slot().equals(winner)) {
+                    tally[1]++;
+                } else {
+                    tally[2]++;
+                }
+            }
+        }
+        Map<SourceId, SlotLoss> losses = new LinkedHashMap<>();
+        counts.forEach((source, tally) -> losses.put(source,
+                new SlotLoss(tally[0], tally[1], tally[2], tally[0] - tally[1] - tally[2])));
+        return new SlotLoss.BySource(losses);
     }
 
     /** The indices of the entries that won, in claim order. */
