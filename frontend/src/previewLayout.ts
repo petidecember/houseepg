@@ -13,7 +13,7 @@ export const DEFAULT_HOURS = 5;
 export const MIN_HOURS = 1;
 export const MAX_HOURS = 24;
 
-/** A tick is drawn every half hour; only the full hours are labelled. */
+/** A tick is drawn every half hour; the halves are labelled too, just dimmer. */
 const TICK_MINUTES = 30;
 
 const HALF_HOUR = TICK_MINUTES * 60_000;
@@ -79,21 +79,79 @@ export function geometry(
   };
 }
 
-/** Half-hour ticks, in percentages of the height; `label` is set on the full hours only. */
-export function ticks(window: PreviewWindow): { top: number; label: string; half: boolean }[] {
+export type Tick = { top: number; label: string; half: boolean };
+
+/**
+ * Half-hour ticks, in percentages of the track's height. Every tick is labelled — the mock drew half
+ * hours dimmer, not blank — and the window's own start is always a tick, so the top of the axis reads
+ * the time the preview begins at even when that is not on a half hour (the panel opens on "now").
+ */
+export function ticks(window: PreviewWindow): Tick[] {
   const from = windowStart(window).getTime();
   const to = windowStop(window).getTime();
   if (!(to > from)) {
     return [];
   }
+  const marks: Tick[] = [{ top: 0, label: timeOf(new Date(from)), half: new Date(from).getMinutes() !== 0 }];
   const first = Math.ceil(from / HALF_HOUR) * HALF_HOUR;
-  const marks: { top: number; label: string; half: boolean }[] = [];
-  for (let at = first; at <= to; at += HALF_HOUR) {
+  for (let at = first === from ? from + HALF_HOUR : first; at <= to; at += HALF_HOUR) {
     const when = new Date(at);
     const half = when.getMinutes() !== 0;
-    marks.push({ top: ((at - from) / (to - from)) * 100, label: half ? '' : timeOf(when), half });
+    marks.push({ top: ((at - from) / (to - from)) * 100, label: timeOf(when), half });
   }
   return marks;
+}
+
+/** The track is a fixed pixel height, so a percentage can be turned back into the room a block has. */
+export const TRACK_PX = 320;
+/** The floor a block is allowed to reach: enough for one readable line plus its separator. */
+export const MIN_BLOCK_PX = 22;
+
+/** A track only grows to keep the shortest block readable, and never past this. */
+export const MAX_TRACK_PX = 1400;
+
+/**
+ * How tall the track has to be for this window. A dense hour would squeeze a 15-minute programme into
+ * 16 px and its title would be unreadable, so the track grows until the shortest entry has
+ * MIN_BLOCK_PX to itself — which is why the page scrolls on a busy window instead of squashing it.
+ */
+export function trackHeight(window: PreviewWindow, shortestMinutes: number | null): number {
+  if (shortestMinutes === null || !(shortestMinutes > 0) || !(window.hours > 0)) {
+    return TRACK_PX;
+  }
+  const pixelsPerMinute = MIN_BLOCK_PX / shortestMinutes;
+  return Math.round(Math.min(MAX_TRACK_PX, Math.max(TRACK_PX, pixelsPerMinute * window.hours * 60)));
+}
+
+/** The shortest entry a drawing column holds, in minutes, or null when nothing is drawn. */
+export function shortestEntry(spans: { start: string; stop: string }[]): number | null {
+  let shortest: number | null = null;
+  for (const span of spans) {
+    const start = Date.parse(span.start);
+    const stop = Date.parse(span.stop);
+    if (Number.isNaN(start) || Number.isNaN(stop) || !(stop > start)) {
+      continue;
+    }
+    const minutes = (stop - start) / 60_000;
+    shortest = shortest === null ? minutes : Math.min(shortest, minutes);
+  }
+  return shortest;
+}
+
+/** What fits in a block. A 15-minute programme is 16 px tall and cannot hold three lines. */
+export type Detail = 'title' | 'verdict' | 'full';
+
+/**
+ * How much of a block to draw, from its height. The design asks for the verdict inline, but a block
+ * that is too short would paint its text over the next one — so the extra lines are dropped rather
+ * than squeezed (HOU-25: three 15-minute 9.Tv programmes stacked their titles over each other).
+ */
+export function detailLevel(heightPercent: number, trackPx = TRACK_PX): Detail {
+  const room = (heightPercent / 100) * trackPx;
+  if (room >= 42) {
+    return 'full';
+  }
+  return room >= 26 ? 'verdict' : 'title';
 }
 
 /** Where the `now` line falls, or null when it falls outside the window. */
@@ -105,6 +163,44 @@ export function nowMarker(window: PreviewWindow, now: Date): number | null {
     return null;
   }
   return ((at - from) / (to - from)) * 100;
+}
+
+/**
+ * The column header's height, which `.merge-col-head` and `.merge-gutter-filler` both set in the
+ * stylesheet. Everything that has to clear the header uses this one number.
+ */
+export const HEAD_PX = 32;
+/**
+ * Where the `now` line sits, in pixels from the top of the column stack.
+ *
+ * The line is a child of `.merge-columns`, which is 32 px of header and 30 px of case label taller than
+ * the track itself. A percentage there is a percentage of the WRONG box: it drifts by the case label's
+ * height, so near the end of the window the line lands below the last programme, over the footer
+ * (HOU-25, m03255). `marker` is a percentage of the TRACK, so it has to be applied to the track's own
+ * height and then offset past the header.
+ *
+ * HEAD_PX is `.merge-col-head`'s and `.merge-gutter-filler`'s height; all three must change together.
+ */
+export function nowLineTop(marker: number, trackPx: number): number {
+  return HEAD_PX + (marker / 100) * trackPx;
+}
+
+/**
+ * What the day and start pickers may reach: the channel's own published span as the backend reports it,
+ * falling back to the window's entries only when the backend did not answer with one. The fallback
+ * matters because a window-clipped entry list can only ever cover the days already on screen, which is
+ * what made every day but today unselectable (HOU-25, m03255).
+ */
+export function pickerRange(
+  available: { first: string | null; last: string | null } | null | undefined,
+  drawn: { start: string; stop: string }[],
+): DataRange | null {
+  const first = available?.first;
+  const last = available?.last;
+  if (first && last) {
+    return { first: new Date(first), last: new Date(last) };
+  }
+  return dataRange(drawn);
 }
 
 /** The spans a channel actually has, which is what bounds the day and start pickers. */

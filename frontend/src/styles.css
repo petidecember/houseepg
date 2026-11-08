@@ -345,6 +345,34 @@ td.pick {
   width: 4.5rem;
 }
 
+/* Edge and Chromium paint the date and time picker glyph with a near-black default, which is invisible
+   on this panel. `color-scheme: dark` is what fixes it: the control then draws its own light glyph.
+   Do NOT also filter the indicator — an invert on top of the dark glyph turned it mid-grey and it read
+   as broken, which is how the first attempt shipped (HOU-25, measured live). */
+.merge-controls input[type='date'],
+.merge-controls input[type='time'],
+.merge-controls input[type='number'] {
+  color-scheme: dark;
+}
+
+.merge-span-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.merge-controls input[type='range'] {
+  width: 140px;
+  accent-color: var(--ok);
+  padding: 0;
+}
+
+.merge-span-value {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  min-width: 2.4rem;
+}
+
 .merge-toggle {
   flex-direction: row !important;
   align-items: center;
@@ -352,24 +380,48 @@ td.pick {
 }
 
 .merge-grid {
-  display: flex;
-  align-items: stretch;
+  display: grid;
+  grid-template-areas: 
+      "merge-gutter-filler merge-columns"
+      "merge-gutter        merge-columns";
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto 1fr;
   border: 1px solid var(--line);
   border-radius: 8px;
   overflow: hidden;
 }
 
-/* One striped surface behind everything: the columns are transparent, so the stripes read as a single
-   sheet and the hour rules, when shown, sit on top of the same sheet. */
+/* The striped sheet belongs to the TRACK, not the column: a block's `top`/`height` are percentages of
+   its track, so the sheet, the hour rules and the blocks are all measured in the same box. Painted on
+   the column it also striped the head and the footer, which the design does not do. */
 .merge-gutter,
 .merge-col {
   position: relative;
-  background: repeating-linear-gradient(45deg, #22262f 0 6px, #191c22 6px 12px);
 }
 
+.merge-col {
+  background: var(--panel);
+}
+
+/* The gutter is a column like any other: a head cell above a track of the same fixed height. As a bare
+   flex item it stretched to the grid's whole height (head + track + footer) while a block's percentage
+   is of its track alone, so every label drifted ~60 px down against the programmes it names. */
 .merge-gutter {
   width: 3.5rem;
   flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  grid-area: merge-gutter;
+}
+
+.merge-gutter-filler {
+  grid-area: merge-gutter-filler;
+  height: 32px;
+}
+
+.merge-gutter-track {
+  position: relative;
+  width: 100%;
 }
 
 .merge-gutter .tick {
@@ -382,6 +434,20 @@ td.pick {
   font-size: 11px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* A half hour that opens a window still has to be readable; the mock drew these dimmer, not blank. */
+.merge-gutter .tick.half {
+  color: #6f7683;
+  font-size: 10px;
+}
+
+.merge-columns {
+  grid-area: merge-columns;
+  position: relative;
+  display: flex;
+  align-items: stretch;
 }
 
 .merge-col {
@@ -392,13 +458,23 @@ td.pick {
   flex-direction: column;
 }
 
+/* The result column is set off with a soft seam, not a blue accent rule: the accent is the UI's
+   "interactive" colour and a solid 2 px line of it read as a selection (HOU-25). */
 .merge-result {
-  border-left: 2px solid var(--accent);
+  border-left: 2px solid var(--line);
   flex: 1.2 1 0;
 }
 
+/* A fixed row height, shared with the gutter's empty head: the head and the case row are grid bands, and
+   if they size to their own text every column's track starts at a different pixel (HOU-25). Keep these two
+   numbers equal to HEAD_PX and CASE_PX. */
 .merge-col-head {
-  padding: 6px 8px;
+  height: 32px;
+  box-sizing: border-box;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: 12px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
@@ -409,32 +485,53 @@ td.pick {
 
 .merge-track {
   position: relative;
-  flex: 1 1 auto;
-  min-height: 320px;
+  flex: 0 0 auto;
+  /* A fixed height, not a minimum: every track has to be the same height or the same programme sits at
+     a different pixel in each column. This is the box a block's percentage, a tick and an hour rule are
+     all measured in — keep it in step with TRACK_PX in previewLayout.ts. */
+  height: var(--track-px, 320px);
+  background-color: #101118;
+  background-image: repeating-linear-gradient(45deg, #22262f 0 6px, #191c22 6px 12px);
 }
 
 .merge-col-case {
-  padding: 6px 8px;
+  height: 30px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
   font-size: 11px;
   color: var(--muted);
   border-top: 1px solid var(--line);
   background: var(--panel);
 }
 
-/* Hour rules are an overlay on the shared surface, so hiding them hides exactly the lines and nothing
-   about the columns or the stripes. */
-.merge-grid.with-rules .merge-col::before,
-.merge-grid.with-rules .merge-result::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  /* One rule per hour: the step is set from the span, so a 5 h window gets five lines. */
-  background: repeating-linear-gradient(
-    to bottom,
-    rgba(255, 255, 255, 0.1) 0 1px,
-    transparent 1px var(--hour-step, 20%)
-  );
+/* The hour rules are a background layer on the same box as the stripes and the blocks, so they cannot
+   drift from either. One rule per hour: the step is a custom property set from the span, so a 5 h window
+   gets five lines. Always drawn — the checkbox controls the `now` line, not these (HOU-25). */
+.merge-grid .merge-track {
+  background-image: repeating-linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0.1) 0 1px,
+      transparent 1px var(--hour-step, 20%)
+    ),
+    repeating-linear-gradient(45deg, #22262f 0 6px, #191c22 6px 12px);
+}
+
+/* The `now` line is the one thing the checkbox hides: it is the marker on the time axis, and the label
+   says so. Everything else — stripes, hour rules — stays drawn, because hiding those was never what the
+   control was for (HOU-25, m03255: the user's "time ruler" meant this red line). */
+.merge-grid:not(.with-now) .now-line {
+  display: none;
+}
+
+/* The gutter is a scale, not a programme track: no stripes and no hour rules under the numbers. The
+   selector carries the same .merge-grid prefix as the hour-rule rule above it, because a bare
+   `.merge-gutter .merge-track` (two classes) loses to `.merge-grid .merge-track` (also two, but later in
+   the sheet the hour rule won) and the scale came out striped and ruled (HOU-25). */
+.merge-grid .merge-gutter .merge-track {
+  background-image: none;
+  background-color: transparent;
 }
 
 .block {
@@ -442,17 +539,42 @@ td.pick {
   left: 0;
   right: 0;
   overflow: hidden;
-  padding: 3px 6px;
+  padding: 2px 6px;
   font-size: 11px;
-  line-height: 1.25;
+  line-height: 1.2;
   border-left: 3px solid var(--line);
   color: var(--text);
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 0;
+}
+
+/* A block too short for more than its title: it clips rather than paints over the programme below. */
+.block.tight {
+  padding-top: 0;
+  padding-bottom: 0;
+  justify-content: center;
+}
+
+.block.tight .block-title {
+  font-size: 10px;
+  line-height: 1.1;
 }
 
 /* Full-bleed green and red, no rounded corners: the block covers the striped surface it claimed. */
+/* Blocks sit flush against each other in a dense hour, so each one carries a hairline at its foot:
+   without it a run of same-length programmes reads as one undivided band (HOU-25). */
+.block::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.14);
+  pointer-events: none;
+}
+
 .block.won {
   background: #16241d;
   border-left-color: var(--ok);
@@ -497,7 +619,7 @@ td.pick {
   left: 0;
   right: 0;
   height: 0;
-  border-top: 2px solid #d05a5a;
+  border-top: 2px dashed #d05a5a;
   pointer-events: none;
 }
 

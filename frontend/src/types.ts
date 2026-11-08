@@ -168,6 +168,8 @@ export type MergePreview = {
   name: string | null;
   columns: PreviewColumn[];
   result: { entries: PreviewResultEntry[]; window: { coverage: PreviewSpan[]; gaps: PreviewSpan[] } };
+  /** The span the channel is published over anywhere in the guide, so the pickers can reach its days. */
+  available: { first: string | null; last: string | null };
 };
 
 export type PreviewWindow = {

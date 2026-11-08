@@ -204,6 +204,30 @@ class MergeBreakdownTest {
     }
 
     /**
+     * The pickers are bounded by the channel's whole published span, not by the window on screen: a
+     * window-clipped span is what made every day but today unselectable (HOU-25, m03255).
+     */
+    @Test
+    void availableSpansTheWholeGuideNotJustThePreviewWindow() {
+        store.saveRegistry(List.of(new Channel(new ChannelId("amc.xx"), "AMC", null, "1",
+                Channel.Origin.PLAYLIST)));
+        store.saveNormalized(new SourceEpg(new SourceId("a"),
+                List.of(new SourceChannel("AMC.a", "AMC HD", null)),
+                List.of(new SourceProgramme("AMC.a", new Slot(at(16, 0).minusDays(2),
+                                at(17, 0).minusDays(2)), "Older", null, null, null, null),
+                        new SourceProgramme("AMC.a", new Slot(at(20, 0), at(21, 0)), "Film", null, null, null,
+                                null))), alphaIds());
+        matches.saveAuto(automatic());
+
+        MergeBreakdown.Breakdown breakdown = breakdown().breakdown(new ChannelId("amc.xx"), WINDOW,
+                Optional.empty());
+
+        // Two days before the window it still knows the guide reaches back that far.
+        assertThat(breakdown.available().first()).isEqualTo(at(16, 0).minusDays(2));
+        assertThat(breakdown.available().last()).isEqualTo(at(21, 0));
+    }
+
+    /**
      * The anti-drift test: for every arrangement of the sources and every channel, the entries the
      * preview reports as won inside the window are exactly the programmes the live merge serves there.
      */

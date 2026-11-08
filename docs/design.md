@@ -295,7 +295,7 @@ Two surfaces show merged data, and they answer different questions.
 ```text
   provider order    #1 Alpha TV   #2 Beta Télé   #3 Gamma Sat   #4 Delta Media
   ─────────────────────────────────────────────────────────────────────────────
-  channel      Alpha TV HD        day 05/11/2026   from 20:00   span [5 h]  ☑ guide lines
+  channel      Alpha TV HD        day 05/11/2026   from 20:00   span [5 h]  ☑ now line
                                                                     20:00 ──▶ 01:00
   ┌───────────────┬───────────────┬───────────────┬───────────────┬───────────────┐
   │ 1 Alpha TV    │ 2 Beta Télé   │ 3 Gamma Sat   │ 4 Delta Media │ Merge result  │
@@ -336,9 +336,17 @@ Two surfaces show merged data, and they answer different questions.
   fields (`weaker: description — Beta Télé had one`). Its footer carries the covered span, the
   programme and gap counts, and the reminder that nothing changes until **Apply order**.
 - **Defaults and pickers.** The preview opens on the **first channel in the list**, **today**, at the
-  **current time**, with a default span; the day picker only steps across days the channel has data
-  for, and the start-time picker within them. Hour rules can be switched off when they get in the
-  way.
+  **current time**, with a default span. The day and start pickers are bounded by the channel's
+  **published span across the whole guide**, not by the window on screen: the window's own entries can
+  only ever cover the days already in view, so bounding on them made every day but today unselectable.
+  The backend reports that span alongside the breakdown (`available`), unclipped by the window.
+- **A block has a floor.** A dense hour would squeeze a 15-minute programme into a few pixels and its
+  title would be unreadable, so the track is **as tall as its shortest entry needs** (a minimum block
+  height, capped) and the page scrolls instead of squashing. Every column shares that one height, so a
+  programme still starts at the same pixel in all of them. Flush blocks carry a **hairline at their
+  foot**, because without it a run of back-to-back programmes reads as one undivided band.
+- **The `now` line is the thing the checkbox hides.** It marks the current time on the axis; nothing
+  else — stripes or hour rules — is switched by it.
 
 **One walk, two callers.** The preview must not be a second merge engine: the slot-claim loop of
 `PriorityMerge.merge` (§6.3) is extracted into a **pure function that takes the order as a

@@ -137,6 +137,7 @@ public class InspectionController {
             return ResponseEntity.badRequest().body(new Problem(e.getMessage()));
         }
     }
+
     /** Confirms or corrects a match; a curated row survives every later automatic pass. */
     @PutMapping("/api/matches")
     public ResponseEntity<?> decide(@RequestBody DecideRequest request) {
@@ -295,14 +296,30 @@ public class InspectionController {
      * merged timeline, so the browser formats them in the viewer's zone; a column carries its own window
      * because it is what decides which of its spans are stripes.
      */
-    public record MergeResponse(String id, String name, List<ColumnDto> columns, ResultDto result) {
+    public record MergeResponse(String id, String name, List<ColumnDto> columns, ResultDto result,
+            AvailableDto available) {
 
         static MergeResponse from(MergeBreakdown.Breakdown breakdown) {
             return new MergeResponse(
                     breakdown.channel() == null ? null : breakdown.channel().id().value(),
                     breakdown.channel() == null ? null : breakdown.channel().label(),
                     breakdown.columns().stream().map(ColumnDto::from).toList(),
-                    ResultDto.from(breakdown.result()));
+                    ResultDto.from(breakdown.result()),
+                    AvailableDto.from(breakdown.available()));
+        }
+    }
+
+    /**
+     * The span this channel is published over, across every configured provider and independent of the
+     * window on screen: what the day and time pickers are bounded by, so they can reach any day the
+     * guide holds rather than only the days the current window shows.
+     */
+    public record AvailableDto(String first, String last) {
+
+        static AvailableDto from(MergeBreakdown.Available available) {
+            return new AvailableDto(
+                    available.first() == null ? null : DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(available.first()),
+                    available.last() == null ? null : DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(available.last()));
         }
     }
 

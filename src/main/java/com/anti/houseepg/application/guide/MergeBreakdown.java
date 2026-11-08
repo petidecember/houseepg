@@ -21,6 +21,7 @@ import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -68,7 +69,8 @@ public class MergeBreakdown {
         if (channel.isEmpty()) {
             // The id is not a channel at all — not even a pass-through one — so there is nothing to
             // explain: the caller asked about a channel that does not exist, not about a quiet one.
-            return new Breakdown(null, List.of(), new Result(List.of(), new Window(List.of(), List.of())));
+            return new Breakdown(null, List.of(), new Result(List.of(), new Window(List.of(), List.of())),
+                    new Available(null, null));
         }
 
         // One column per provider, in the order being previewed: the draft order is what the panel
@@ -110,6 +112,21 @@ public class MergeBreakdown {
             }
         }
 
+        // Everything the channel is attached to anywhere in the guide, window or not: the pickers are
+        // bounded by what the feed actually publishes, not by the slice on screen (HOU-25).
+        List<Slot> published = new ArrayList<>();
+        for (SourceEpg document : applied.inOrder(order)) {
+            for (SourceProgramme programme : document.programmes()) {
+                if (attachedTo(applied.match(), document.source(), programme.sourceChannelId(), channelId)) {
+                    published.add(programme.slot());
+                }
+            }
+        }
+        published.sort(Comparator.comparing(Slot::start));
+        Available available = published.isEmpty()
+                ? new Available(null, null)
+                : new Available(published.get(0).start(), published.get(published.size() - 1).stop());
+
         List<Column> columns = documents.stream()
                 .map(document -> column(document, applied.match(), channelId, window, entries, fates,
                         wonBySource))
@@ -125,7 +142,15 @@ public class MergeBreakdown {
                 .toList();
 
         return new Breakdown(channel.orElseThrow(), columns,
-                new Result(result, asWindow(window, served.stream().map(Programme::slot).toList())));
+                new Result(result, asWindow(window, served.stream().map(Programme::slot).toList())),
+                available);
+    }
+
+    /**
+     * The span the channel is published over, across every configured provider and independent of the
+     * window on screen. Both bounds are null when nothing in the guide attaches to this channel.
+     */
+    public record Available(OffsetDateTime first, OffsetDateTime last) {
     }
 
     /** A field a programme does not carry while an entry it displaced did. */
@@ -228,7 +253,7 @@ public class MergeBreakdown {
      * @param columns one per provider, in the applied order the walk used
      * @param result what the feed serves for this channel once the order is applied
      */
-    public record Breakdown(Channel channel, List<Column> columns, Result result) {
+    public record Breakdown(Channel channel, List<Column> columns, Result result, Available available) {
 
         public Breakdown {
             columns = columns == null ? List.of() : List.copyOf(columns);

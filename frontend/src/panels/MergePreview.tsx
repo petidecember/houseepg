@@ -12,14 +12,20 @@ import {
   MAX_HOURS,
   MIN_HOURS,
   bounded,
-  dataRange,
+  dayOf,
+  detailLevel,
   geometry,
   lostReason,
   mergeQuery,
+  nowLineTop,
   nowMarker,
   openingWindow,
+  pickerRange,
+  shortestEntry,
   timeOfIso,
   ticks,
+  trackHeight,
+  windowStart,
   weaknessText,
   windowStop,
 } from '../previewLayout';
@@ -39,7 +45,7 @@ export function MergePreview({
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [window, setWindow] = useState<PreviewWindow>(() => openingWindow(new Date()));
-  const [guideLines, setGuideLines] = useState(true);
+  const [showNow, setShowNow] = useState(true);
   const [preview, setPreview] = useState<PreviewPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -91,21 +97,30 @@ export function MergePreview({
 
   const nameOf = (id: string) => order.find((source) => source.id === id)?.name ?? id;
 
-  // Everything the channel has in the guide, so the pickers cannot step outside its own data.
-  const range = useMemo(() => {
-    const spans = (preview?.columns ?? []).flatMap((column) =>
-      column.entries.map((entry) => ({ start: entry.start, stop: entry.stop })),
-    );
-    return dataRange(spans);
-  }, [preview]);
+  // Every entry the rows are drawing for this window: what decides how tall a shortest block has to be.
+  const drawn = useMemo(
+    () =>
+      (preview?.columns ?? []).flatMap((column) =>
+        column.entries.map((entry) => ({ start: entry.start, stop: entry.stop })),
+      ),
+    [preview],
+  );
+
+  // The pickers are bounded by the backend's `available`, which spans the whole guide rather than the
+  // window on screen — the window's own entries only ever cover the days already in view (HOU-25).
+  const range = useMemo(() => pickerRange(preview?.available, drawn), [preview, drawn]);
+
+  const track = useMemo(() => trackHeight(window, shortestEntry(drawn)), [window, drawn]);
 
   const shift = (deltaDays: number) => {
-    const next = new Date(`${window.day}T${window.from}:00`);
+    // `toISOString` is UTC and would step to the wrong day west of Greenwich after a local midnight.
+    const next = windowStart(window);
     next.setDate(next.getDate() + deltaDays);
-    setWindow(bounded({ ...window, day: next.toISOString().slice(0, 10) }, range));
+    setWindow(bounded({ ...window, day: dayOf(next) }, range));
   };
 
   const markDraft = dirty ? 'not applied yet' : 'as applied';
+  const marker = nowMarker(window, now);
 
   return (
     <section className="merge-preview">
@@ -134,8 +149,8 @@ export function MergePreview({
           <input
             type="date"
             value={window.day}
-            min={range ? range.first.toISOString().slice(0, 10) : undefined}
-            max={range ? range.last.toISOString().slice(0, 10) : undefined}
+            min={range ? dayOf(range.first) : undefined}
+            max={range ? dayOf(range.last) : undefined}
             onChange={(event) => setWindow(bounded({ ...window, day: event.target.value }, range))}
           />
         </label>
@@ -150,22 +165,24 @@ export function MergePreview({
             onChange={(event) => setWindow(bounded({ ...window, from: event.target.value }, range))}
           />
         </label>
-        <label>
+        <label className="merge-span">
           span
-          <input
-            type="number"
-            min={MIN_HOURS}
-            max={MAX_HOURS}
-            value={window.hours}
-            onChange={(event) =>
-              setWindow(bounded({ ...window, hours: Number(event.target.value) }, range))
-            }
-          />
-          h
+          <span className="merge-span-row">
+            <input
+              type="range"
+              min={MIN_HOURS}
+              max={MAX_HOURS}
+              value={window.hours}
+              onChange={(event) =>
+                setWindow(bounded({ ...window, hours: Number(event.target.value) }, range))
+              }
+            />
+            <span className="merge-span-value">{window.hours} h</span>
+          </span>
         </label>
         <label className="merge-toggle">
-          <input type="checkbox" checked={guideLines} onChange={(event) => setGuideLines(event.target.checked)} />
-          guide lines
+          <input type="checkbox" checked={showNow} onChange={(event) => setShowNow(event.target.checked)} />
+          now line
         </label>
         <span className="muted">
           {window.from} → {timeOfIso(windowStop(window).toISOString())}
@@ -178,27 +195,36 @@ export function MergePreview({
 
       {preview && (
         <div
-          className={`merge-grid${guideLines ? ' with-rules' : ''}`}
-          style={{ ['--hour-step' as string]: `${100 / window.hours}%` }}
+          className={`merge-grid${showNow ? ' with-now' : ''}`}
+          style={{
+            ['--hour-step' as string]: `${100 / window.hours}%`,
+            ['--track-px' as string]: `${track}px`,
+          }}
         >
+          <div className="merge-gutter-filler"></div>
           <div className="merge-gutter">
-            {ticks(window).map((tick, index) => (
-              <span key={index} className={`tick${tick.half ? ' half' : ''}`} style={{ top: `${tick.top}%` }}>
-                {tick.label}
-              </span>
-            ))}
+            <div className="merge-track merge-gutter-track">
+              {ticks(window).map((tick, index) => (
+                <span key={index} className={`tick${tick.half ? ' half' : ''}`} style={{ top: `${tick.top}%` }}>
+                  {tick.label}
+                </span>
+              ))}
+            </div>
           </div>
-          {preview.columns.map((column, index) => (
-            <MergeColumn
-              key={column.source}
-              rank={index + 1}
-              column={column}
-              window={window}
-              now={now}
-              nameOf={nameOf}
-            />
-          ))}
-          <MergeResult preview={preview} window={window} now={now} nameOf={nameOf} />
+          <div className='merge-columns'>
+            {preview.columns.map((column, index) => (
+              <MergeColumn
+                key={column.source}
+                rank={index + 1}
+                column={column}
+                window={window}
+                trackPx={track}
+                nameOf={nameOf}
+              />
+            ))}
+            <MergeResult preview={preview} window={window} trackPx={track} nameOf={nameOf} />
+            {marker !== null && <span className="now-line" style={{ top: `${nowLineTop(marker, track)}px` }} />}
+          </div>
         </div>
       )}
 
@@ -216,16 +242,15 @@ function MergeColumn({
   rank,
   column,
   window,
-  now,
+  trackPx,
   nameOf,
 }: {
   rank: number;
   column: PreviewColumn;
   window: PreviewWindow;
-  now: Date;
+  trackPx: number;
   nameOf: (id: string) => string;
 }) {
-  const marker = nowMarker(window, now);
   return (
     <div className="merge-col">
       <div className="merge-col-head">
@@ -233,9 +258,8 @@ function MergeColumn({
       </div>
       <div className="merge-track">
         {column.entries.map((entry, index) => (
-          <EntryBlock key={index} entry={entry} window={window} nameOf={nameOf} />
+          <EntryBlock key={index} entry={entry} window={window} trackPx={trackPx} nameOf={nameOf} />
         ))}
-        {marker !== null && <span className="now-line" style={{ top: `${marker}%` }} />}
       </div>
       <div className="merge-col-case">{column.caseLabel}</div>
     </div>
@@ -245,10 +269,12 @@ function MergeColumn({
 function EntryBlock({
   entry,
   window,
+  trackPx,
   nameOf,
 }: {
   entry: PreviewEntry;
   window: PreviewWindow;
+  trackPx: number;
   nameOf: (id: string) => string;
 }) {
   const box = geometry(entry.start, entry.stop, window);
@@ -256,14 +282,25 @@ function EntryBlock({
     return null;
   }
   const tone = entry.fate === 'WON' ? 'won' : entry.fate === 'LOST' ? 'lost' : 'excluded';
+  // A short programme gets only what fits; the rest would paint over the block below it.
+  const detail = detailLevel(box.height, trackPx);
+  const verdict =
+    entry.fate === 'LOST'
+      ? entry.lostTo
+        ? lostReason(entry.start, entry.stop, nameOf(entry.lostTo))
+        : 'lost every overlap'
+      : null;
   return (
-    <div className={`block ${tone}`} style={{ top: `${box.top}%`, height: `${box.height}%` }}>
+    <div
+      className={`block ${tone}${detail === 'title' ? ' tight' : ''}`}
+      style={{ top: `${box.top}%`, height: `${box.height}%` }}
+      title={[entry.title ?? '—', verdict, entry.weaker.length > 0 ? `weaker: ${weaknessText(entry.weaker, nameOf)}` : null]
+        .filter(Boolean)
+        .join(' · ')}
+    >
       <span className="block-title">{entry.title ?? '—'}</span>
-      {entry.fate === 'LOST' && entry.lostTo && (
-        <span className="block-why">{lostReason(entry.start, entry.stop, nameOf(entry.lostTo))}</span>
-      )}
-      {entry.fate === 'LOST' && !entry.lostTo && <span className="block-why">lost every overlap</span>}
-      {entry.weaker.length > 0 && (
+      {detail !== 'title' && verdict && <span className="block-why">{verdict}</span>}
+      {detail === 'full' && entry.weaker.length > 0 && (
         <span className="block-weak">weaker: {weaknessText(entry.weaker, nameOf)}</span>
       )}
     </div>
@@ -273,15 +310,14 @@ function EntryBlock({
 function MergeResult({
   preview,
   window,
-  now,
+  trackPx,
   nameOf,
 }: {
   preview: PreviewPayload;
   window: PreviewWindow;
-  now: Date;
+  trackPx: number;
   nameOf: (id: string) => string;
 }) {
-  const marker = nowMarker(window, now);
   return (
     <div className="merge-col merge-result">
       <div className="merge-col-head">Merge result</div>
@@ -291,17 +327,25 @@ function MergeResult({
           if (!box) {
             return null;
           }
+          const detail = detailLevel(box.height, trackPx);
+          const winner = `✓ ${nameOf(entry.source)}`;
           return (
-            <div key={index} className="block won" style={{ top: `${box.top}%`, height: `${box.height}%` }}>
+            <div
+              key={index}
+              className={`block won${detail === 'title' ? ' tight' : ''}`}
+              style={{ top: `${box.top}%`, height: `${box.height}%` }}
+              title={[entry.title ?? '—', winner, entry.weaker.length > 0 ? `weaker: ${weaknessText(entry.weaker, nameOf)}` : null]
+                .filter(Boolean)
+                .join(' · ')}
+            >
               <span className="block-title">{entry.title ?? '—'}</span>
-              <span className="block-winner">✓ {nameOf(entry.source)}</span>
-              {entry.weaker.length > 0 && (
+              {detail !== 'title' && <span className="block-winner">{winner}</span>}
+              {detail === 'full' && entry.weaker.length > 0 && (
                 <span className="block-weak">weaker: {weaknessText(entry.weaker, nameOf)}</span>
               )}
             </div>
           );
         })}
-        {marker !== null && <span className="now-line" style={{ top: `${marker}%` }} />}
       </div>
       <div className="merge-col-case">the feed</div>
     </div>
