@@ -136,10 +136,16 @@ Used only for matching, never for output. Applied to `display-name` and to the s
 1. Strip a **country prefix**: a two-letter country code, a dash, then the name (`HU - AMC` → `AMC`).
 2. Strip a **country suffix** (`AMC.hu` → `AMC`).
 3. Strip **quality tags**: `(HD)`, `HD`, `(FHD)`, `FHD`, `(SD)`, `SD`, `4K`, `UHD`.
-4. Lowercase, strip punctuation, collapse whitespace.
+4. Spell a literal `+` as `plus` (`RTL+` → `RTLplus`).
+5. Lowercase, strip punctuation, collapse whitespace.
 
 `AMC.hu` → `amc`; `AMC (HD).hu` → `amc`; `HU - Animal Planet` and `Animal Planet (HD).hu` → both
 `animal planet`. See ADR-0003.
+
+A `+` is a word, not punctuation. `RTL+` is RTL's streaming service, not `RTL`, and `M4 Sport+` is not
+`M4 Sport`; dropping the sign folded a whole streaming catalogue into the linear channel's guide
+(HOU-46). Spelling it out keeps the pair joined (`Canal+ Action` = `Canal+.Action`) without joining the
+channel it extends (`RTLplus` ≠ `rtl`).
 
 ### 6.2 Channel matching
 

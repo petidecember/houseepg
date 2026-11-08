@@ -65,9 +65,26 @@ class ProviderSamplesTest {
         RefreshResult result = refreshGuide().refresh();
         Guide guide = result.guide();
 
+        assertThat(guide.channels()).hasSize(248);
+        assertThat(guide.programmes()).hasSize(1827);
+
+        // A literal "+" marks a different channel, so one provider's "Channel 076+" must not become the
+        // other provider's plain "Channel 076" (HOU-46). Three of the five sample pairs used to fold
+        // together and are now unmatched pass-throughs; where the ids really are the same channel the
+        // pair still joins (channel076+ and Channel 076+ both land on channel076+.xx).
+        Set<String> passThroughChannelIds = guide.channels().stream()
+                .filter(channel -> channel.origin() == Channel.Origin.PASS_THROUGH)
+                .map(channel -> channel.id().value())
+                .collect(Collectors.toSet());
+        assertThat(passThroughChannelIds)
+                .contains("Channel 039+ (HD).xx", "Channel 047+ (HD).xx", "Channel 105+ (HD).xx")
+                .doesNotContain("Channel 076+ (HD).xx");
+        assertThat(canonicalOf(result, "provider-b", "Channel 076+ (HD).xx")).isEqualTo("channel076+.xx");
+        assertThat(canonicalOf(result, "provider-b", "Channel 039+ (HD).xx"))
+                .isEqualTo("Channel 039+ (HD).xx");
+
+
         assertThat(result.health()).extracting(SourceHealth::state).containsOnly(SourceHealth.State.OK);
-        assertThat(guide.channels()).hasSize(245);
-        assertThat(guide.programmes()).hasSize(1818);
 
         // The same real channel from two providers lands on one id, and it is the primary source's id.
         assertThat(channelIds(guide)).filteredOn(id -> id.startsWith("channel003")).containsExactly("channel003.xx");
@@ -91,13 +108,9 @@ class ProviderSamplesTest {
         // channels that were kept as pass-throughs.
         assertThat(result.matches()).hasSize(330);
         assertThat(result.matches()).extracting(ChannelMatch::source).doesNotHaveDuplicates();
-        Set<String> passThroughIds = guide.channels().stream()
-                .filter(channel -> channel.origin() == Channel.Origin.PASS_THROUGH)
-                .map(channel -> channel.id().value())
-                .collect(Collectors.toSet());
         assertThat(result.matches()).filteredOn(match -> match.state() == MatchState.UNMATCHED)
                 .extracting(match -> match.canonicalId().value())
-                .containsExactlyInAnyOrderElementsOf(passThroughIds);
+                .containsExactlyInAnyOrderElementsOf(passThroughChannelIds);
     }
 
     /** The real use case, with the transport swapped for the fixture files. */
@@ -127,6 +140,15 @@ class ProviderSamplesTest {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    private static String canonicalOf(RefreshResult result, String source, String sourceChannelId) {
+        return result.matches().stream()
+                .filter(match -> match.source().source().value().equals(source)
+                        && match.source().channelId().equals(sourceChannelId))
+                .map(match -> match.canonicalId().value())
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no match row for " + source + " " + sourceChannelId));
     }
 
     private static Set<String> channelIds(Guide guide) {

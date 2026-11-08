@@ -41,7 +41,15 @@ and the guide would not attach to the channel the DVR actually knows.
 
 Matching normalises both the `display-name` and the source channel id by stripping the country prefix
 (`<CC> - `), the country suffix (`.hu`), and quality tags (`(HD)`, `HD`, `(FHD)`, `FHD`, `(SD)`, `SD`,
-`4K`, `UHD`), then lowercasing and collapsing punctuation and whitespace.
+`4K`, `UHD`), spelling a literal `+` as `plus`, then lowercasing and collapsing punctuation and
+whitespace.
+
+The **`+` is a word, not punctuation** (amended 2026-11-08). `RTL+` is RTL's streaming service and
+`M4 Sport+` is not `M4 Sport`, but the first version of this rule dropped the sign along with the
+other separators, so a provider spelling a channel `RTL+` folded onto plain `RTL` through the
+display-name rung and a streaming catalogue landed in the linear channel's guide (HOU-46). Spelling it
+out keeps one channel's own spellings joined — `Canal+ Action` and `Canal+.Action` still agree — while
+keeping the extended channel apart (`rtlplus` ≠ `rtl`, `m4sportplus` ≠ `m4sport`).
 
 The **M3U registry decides** whether HD and SD are genuinely separate channels: if the playlist lists
 them with distinct `tvg-id`s, they are separate canonical channels and folding must not merge them.
@@ -63,6 +71,12 @@ source channel that matches nothing is kept as a **pass-through channel** rather
   channels, the registry — not the feed — decides, and a wrong auto-match is only caught by the user
   reviewing the match list.
 - The normalization rules are heuristic and will need maintenance as new providers appear.
+- Spelling `+` as `plus` cannot tell an extension marker from a word: `RTL+`, `RTL Plus`, `RTLPlus` and
+  `RTL +` all fold to `rtlplus` (measured), so a provider that carries `RTL+` *and* a separate linear
+  channel genuinely called `RTL Plus` would have them fold together. Nothing in the id says which is
+  meant, and the registry plus the match review is what catches it.
+- A plus that is not an extension (`4+` style numbering) now keeps its own key (`4plus` ≠ `4`) instead of
+  folding away, which is the intended reading but is a visible change for any such channel.
 - Word-spacing differences (`AnimalPlanet` vs `Animal Planet`) need a whitespace-insensitive
   comparison rather than a plain strip.
 

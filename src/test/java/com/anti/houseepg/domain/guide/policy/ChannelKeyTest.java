@@ -37,10 +37,28 @@ class ChannelKeyTest {
     }
 
     @Test
-    void distinctChannelsThatOnlyDifferByAPlusStayDistinctByTheirId() {
-        // The samples really do contain pairs like this; the key collides, the raw id must not.
-        assertThat(ChannelKey.of("channel076.xx")).isEqualTo(ChannelKey.of("channel076+.xx"));
-        assertThat(ChannelKey.of("Channel 076 (HD).xx")).isEqualTo(ChannelKey.of("Channel 076+ (HD).xx"));
+    void aPlusMarksADifferentChannelAndTheKeyKeepsThemApart() {
+        // RTL+ is the streaming service and M4 Sport+ is not M4 Sport. The samples contain exactly this
+        // shape (channel076 against channel076+), and folding the plus away merged them (HOU-46).
+        assertThat(ChannelKey.of("channel076.xx")).isNotEqualTo(ChannelKey.of("channel076+.xx"));
+        assertThat(ChannelKey.of("Channel 076 (HD).xx")).isNotEqualTo(ChannelKey.of("Channel 076+ (HD).xx"));
+
+        assertThat(ChannelKey.of("RTL+.hu").value()).isEqualTo("rtlplus");
+        assertThat(ChannelKey.of("M4 Sport+ (HD).hu").value()).isEqualTo("m4sportplus");
+    }
+
+    @Test
+    void aPlusJoinsItsOwnSpellingsEvenAcrossSeparators() {
+        // The plus must not become a hard boundary: these are one channel spelled two ways.
+        assertThat(ChannelKey.of("Canal+ Action.hu")).isEqualTo(ChannelKey.of("Canal+.Action.hu"));
+        assertThat(ChannelKey.of("Mozi+ (HD).hu")).isEqualTo(ChannelKey.of("Mozi+.hu"));
+        assertThat(ChannelKey.of("Film+ (HD).hu")).isEqualTo(ChannelKey.of("Film+.hu"));
+        assertThat(ChannelKey.of("Filmbox+ One.hu")).isEqualTo(ChannelKey.of("Filmbox+ One (HD).hu"));
+    }
+
+    @Test
+    void aPlusSpelledOutAsAWordIsTheSameChannel() {
+        assertThat(ChannelKey.of("RTL+")).isEqualTo(ChannelKey.of("RTL Plus"));
     }
 
     @Test

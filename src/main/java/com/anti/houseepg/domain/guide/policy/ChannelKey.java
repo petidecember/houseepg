@@ -10,11 +10,18 @@ import java.util.regex.Pattern;
  * ({@code (HD)}, {@code HD}, {@code (FHD)}, {@code (SD)}, {@code 4K}, {@code UHD}, ...) are stripped,
  * then every separator, so word-spacing differences ({@code AnimalPlanet} vs {@code Animal Planet})
  * also collapse.
+ *
+ * <p>A literal {@code +} is a word, not a separator: {@code RTL+} is the streaming service, not
+ * {@code RTL}, and {@code M4 Sport+} is not {@code M4 Sport}. It is spelled out as {@code plus} before
+ * the separators go, so the pair joins its own spellings ({@code Canal+ Action} and {@code Canal+.Action})
+ * without joining the channel it extends (ADR-0003). Dropping it instead made {@code RTL+} fold onto
+ * {@code RTL} and put a streaming catalogue into the linear channel's guide.
  */
 public record ChannelKey(String value) {
 
     private static final Pattern COUNTRY_PREFIX = Pattern.compile("^\\s*[A-Za-z]{2}\\s*[-:|]\\s*");
     private static final Pattern COUNTRY_SUFFIX = Pattern.compile("\\.[A-Za-z]{2,3}$");
+    private static final Pattern PLUS = Pattern.compile("\\+");
     private static final Pattern NON_ALNUM = Pattern.compile("[^a-z0-9]+");
     private static final Pattern HAS_LETTER = Pattern.compile("[A-Za-z]");
 
@@ -35,7 +42,7 @@ public record ChannelKey(String value) {
             text = suffix.replaceFirst("");
         }
 
-        text = QualityTag.strip(text);
+        text = PLUS.matcher(QualityTag.strip(text)).replaceAll(" plus ");
         return new ChannelKey(NON_ALNUM.matcher(text.toLowerCase(Locale.ROOT)).replaceAll(""));
     }
 
