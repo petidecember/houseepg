@@ -26,6 +26,8 @@ public class InMemoryGuideStore implements GuideStore {
     private final Map<SourceId, SourceEpg> normalized = new LinkedHashMap<>();
     private final Map<SourceId, SourceHealth> health = new LinkedHashMap<>();
     private List<Channel> registry = List.of();
+    private List<Channel> lastWrittenRegistry = List.of();
+    private int registryWrites;
     private StoredGuide merged;
     private SlotLoss.BySource slotLosses = SlotLoss.BySource.none();
 
@@ -67,6 +69,18 @@ public class InMemoryGuideStore implements GuideStore {
     @Override
     public void saveRegistry(List<Channel> channels) {
         registry = List.copyOf(channels);
+        lastWrittenRegistry = registry;
+        registryWrites++;
+    }
+
+    /** How many times the registry was written, however many rows each write carried (HOU-49). */
+    public int registryWrites() {
+        return registryWrites;
+    }
+
+    /** What the last write put in the registry, so a caller can tell a re-write from a no-op. */
+    public List<Channel> lastWrittenRegistry() {
+        return lastWrittenRegistry;
     }
 
     @Override

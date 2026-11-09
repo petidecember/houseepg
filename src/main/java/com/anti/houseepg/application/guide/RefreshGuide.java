@@ -49,6 +49,18 @@ public class RefreshGuide {
      */
     private final AtomicBoolean shortRegistryReported = new AtomicBoolean();
 
+    /**
+     * What the playlist last resolved to (HOU-49). With a playlist configured its declarations are re-read on
+     * every tick, and the same collapsed list came back every minute — so the collapse was reported every
+     * minute and the registry was re-written every minute, for a list that had not changed. The declaration
+     * set is the cache key, so a playlist that really did change still reports and still writes.
+     *
+     * <p>Only ever touched from {@code synchronized refreshAll}, which is what makes the pair safe to hold
+     * as plain fields.</p>
+     */
+    private List<Channel> lastPlaylistDeclarations;
+    private List<Channel> lastCollapsedPlaylist;
+
     private static final Logger log = LoggerFactory.getLogger(RefreshGuide.class);
 
     private final GuideSettings settings;
@@ -209,13 +221,7 @@ public class RefreshGuide {
         List<Channel> stored = store.registry();
         var location = settings.playlistLocation();
         if (location.isPresent()) {
-            List<Channel> fromPlaylist = readPlaylist(location.get());
-            if (!fromPlaylist.isEmpty()) {
-                List<Channel> authoritative = collapsed(fromPlaylist, "the playlist");
-                store.saveRegistry(authoritative);
-                return authoritative;
-            }
-            return stored;
+            return fromPlaylist(location.get(), stored);
         }
         if (!stored.isEmpty()) {
             reportShortRegistry(stored, documents);
@@ -226,6 +232,35 @@ public class RefreshGuide {
             store.saveRegistry(seeded);
         }
         return seeded;
+    }
+
+    /**
+     * The playlist is the authority, so its declarations decide the registry — but they are re-read on every
+     * tick, and a tick that resolves the same list must neither re-report the collapse nor re-write the store
+     * (HOU-49). A store that already holds the collapsed list is not written to again either, whichever
+     * process put it there.
+     */
+    private List<Channel> fromPlaylist(String location, List<Channel> stored) {
+        List<Channel> fromPlaylist = readPlaylist(location);
+        if (fromPlaylist.isEmpty()) {
+            return stored;
+        }
+        List<Channel> authoritative = collapsePlaylist(fromPlaylist);
+        if (!authoritative.equals(stored)) {
+            store.saveRegistry(authoritative);
+        }
+        return authoritative;
+    }
+
+    /** Collapses a declaration list, reporting it once per distinct list rather than once per refresh. */
+    private List<Channel> collapsePlaylist(List<Channel> declared) {
+        if (declared.equals(lastPlaylistDeclarations)) {
+            return lastCollapsedPlaylist;
+        }
+        List<Channel> authoritative = collapsed(declared, "the playlist");
+        lastPlaylistDeclarations = declared;
+        lastCollapsedPlaylist = authoritative;
+        return authoritative;
     }
 
     /**

@@ -150,9 +150,11 @@ channel it extends (`RTLplus` ≠ `rtl`).
 ### 6.2 Channel matching
 
 - The **registry** is the authority: it is seeded from the supplied M3U playlist, or — when there is
-  no playlist — from the primary (top-priority) XMLTV source. It is seeded **once** and then kept
-  across refreshes; a refresh never re-seeds it, and an authority that cannot be read keeps the
-  previous registry rather than substituting another source's ids (§6.4, ADR-0002).
+  no playlist — from the primary (top-priority) XMLTV source. Without a playlist it is seeded **once**
+  and then kept across refreshes; a refresh never re-seeds it, and an authority that cannot be read keeps
+  the previous registry rather than substituting another source's ids (§6.4, ADR-0002). With a playlist
+  that playlist *is* the authority, so it is re-read on every refresh and the store is written only when
+  the declarations it collapses to have actually changed (§6.4, HOU-49).
 - Each source channel is matched to a registry channel by the strongest available evidence, in this
   order: the exact source channel id, the exact display name, the normalized id, the normalized
   display name. The M3U decides whether HD and SD are genuinely separate channels (distinct

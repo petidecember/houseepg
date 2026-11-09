@@ -38,6 +38,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.GZIPOutputStream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -142,6 +143,7 @@ class RefreshGuideTest {
     private HttpServer server;
     private final AtomicBoolean sourceBFails = new AtomicBoolean(false);
     private final AtomicBoolean playlistFails = new AtomicBoolean(false);
+    private final AtomicReference<String> servedPlaylist = new AtomicReference<>(PLAYLIST_WITH_REPEATS);
     private final InMemoryChannelMatchStore matchStore = new InMemoryChannelMatchStore();
     private final InMemoryGuideStore guideStore = new InMemoryGuideStore();
     private String base;
@@ -159,7 +161,7 @@ class RefreshGuideTest {
         });
         server.createContext("/a.xml", exchange -> respond(exchange, 200, SOURCE_A));
         server.createContext("/repeating.xml", exchange -> respond(exchange, 200, SOURCE_REPEATING));
-        server.createContext("/dup-playlist.m3u", exchange -> respond(exchange, 200, PLAYLIST_WITH_REPEATS));
+        server.createContext("/dup-playlist.m3u", exchange -> respond(exchange, 200, servedPlaylist.get()));
         server.createContext("/b.xml.gz", exchange -> {
             if (sourceBFails.get()) {
                 respond(exchange, 503, "unavailable");
@@ -320,6 +322,53 @@ class RefreshGuideTest {
         assertThat(result.guide().channels()).filteredOn(channel -> channel.id().value().equals("ch1.xx"))
                 .singleElement()
                 .satisfies(channel -> assertThat(channel.origin()).isEqualTo(Channel.Origin.PLAYLIST));
+    }
+
+    @Test
+    void anUnchangedPlaylistIsNeitherReWrittenNorReCollapsed() {
+        // The playlist is re-read on every scheduler tick, and the live one declares 43 ids twice. Before
+        // this, each tick re-reported the collapse and re-wrote the registry, for a list that had not
+        // changed (HOU-49): the store's write count is the observable.
+        RefreshGuide guide = refreshGuide("/a.xml", Optional.of(base + "/dup-playlist.m3u"));
+
+        guide.refresh();
+
+        assertThat(guideStore.registryWrites()).isEqualTo(1);
+        assertThat(guideStore.lastWrittenRegistry()).extracting(channel -> channel.id().value())
+                .containsExactly("ch1.xx", "ch2.xx");
+
+        // Three more ticks: the declarations are identical, so nothing is written again and the registry is
+        // still the one the first tick established.
+        guide.refresh();
+        guide.refresh();
+        guide.refresh();
+
+        assertThat(guideStore.registryWrites()).isEqualTo(1);
+        assertThat(guideStore.registry()).extracting(channel -> channel.id().value())
+                .containsExactly("ch1.xx", "ch2.xx");
+    }
+
+    @Test
+    void aPlaylistThatReallyChangedIsWrittenAgain() {
+        // The gate is on the content, not on "we have written once": a playlist whose declarations changed
+        // must reach the store again, otherwise the registry would freeze at whatever the first tick saw.
+        RefreshGuide guide = refreshGuide("/a.xml", Optional.of(base + "/dup-playlist.m3u"));
+        guide.refresh();
+        assertThat(guideStore.registryWrites()).isEqualTo(1);
+
+        // The same location now declares one channel fewer — a content change the tick must act on.
+        servedPlaylist.set(PLAYLIST);
+        guide.refresh();
+
+        assertThat(guideStore.registryWrites()).isEqualTo(2);
+        assertThat(guideStore.registry()).extracting(channel -> channel.id().value())
+                .containsExactly("ch1.xx", "ch2.xx");
+        // The declarations differ only in ch1.xx's logo — the store must still receive the new list, which is
+        // why the gate compares the whole declaration rather than the set of ids.
+        assertThat(guideStore.registry()).filteredOn(channel -> channel.id().value().equals("ch1.xx"))
+                .singleElement()
+                .satisfies(channel -> assertThat(channel.iconUrl())
+                        .isEqualTo("https://example.invalid/icons/ch1.png"));
     }
     @Test
     void aMisconfiguredSourceFailsInsteadOfBreakingTheGuide() {
