@@ -16,6 +16,7 @@ import com.anti.houseepg.domain.guide.model.SourceProgramme;
 import com.anti.houseepg.domain.guide.policy.ChannelMatch;
 import com.anti.houseepg.domain.guide.policy.ChannelDeclarations;
 import com.anti.houseepg.domain.guide.policy.ChannelMatching;
+import com.anti.houseepg.domain.guide.policy.Glob;
 import com.anti.houseepg.domain.guide.policy.PriorityMerge;
 import com.anti.houseepg.domain.guide.policy.SourceChannelRef;
 import java.time.Clock;
@@ -303,9 +304,16 @@ public class RefreshGuide {
 
     private List<Channel> readPlaylist(String location) {
         try {
-            List<Channel> channels = channelAuthority.channels(location);
+            List<Channel> channels = channelAuthority.channels(location, settings.playlistGroups());
             if (channels.isEmpty()) {
-                log.warn("Channel authority {} returned no channels; keeping the stored registry", location);
+                List<Glob> groups = settings.playlistGroups();
+                // Name the groups when a filter was configured: an empty read caused by a renamed group
+                // looks exactly like an empty playlist, and the two need different reactions (HOU-45).
+                log.warn(groups.isEmpty()
+                        ? "Channel authority {} returned no channels; keeping the stored registry"
+                        : "Channel authority {} returned no channels in group(s) {}; keeping the stored "
+                                + "registry. Check the group names against the playlist",
+                        location, groups);
             }
             return channels;
         } catch (RuntimeException e) {

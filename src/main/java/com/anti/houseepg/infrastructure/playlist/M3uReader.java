@@ -2,10 +2,13 @@ package com.anti.houseepg.infrastructure.playlist;
 
 import com.anti.houseepg.domain.guide.model.Channel;
 import com.anti.houseepg.domain.guide.model.ChannelId;
+import com.anti.houseepg.domain.guide.policy.Glob;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Anti-corruption adapter: reads an M3U playlist into canonical channels. A {@code tvg-id} becomes the
@@ -13,13 +16,32 @@ import java.util.regex.Pattern;
  */
 public final class M3uReader {
 
+    private static final Logger log = LoggerFactory.getLogger(M3uReader.class);
+
     private static final Pattern ATTRIBUTE = Pattern.compile("([A-Za-z0-9-]+)=\"([^\"]*)\"");
 
     private M3uReader() {
     }
 
+    /** Reads every declared channel — no group filter, because none was configured. */
     public static List<Channel> read(String playlist) {
+        return read(playlist, List.of());
+    }
+
+    /**
+     * Reads a playlist, keeping only the entries whose {@code group-title} matches one of {@code groups}
+     * (HOU-45). An empty list keeps every group, which is what "not configured" has always meant.
+     *
+     * <p>The filter is applied here, before a channel is built, for the same reason the XMLTV exclusion
+     * list lives in its reader: a playlist can carry a hundred thousand entries the registry can never
+     * use, and none of them should reach the model. An entry whose group is absent, empty or unquoted
+     * belongs to no group, so it is dropped once a whitelist is configured — it cannot be shown to
+     * belong to a group that was asked for.
+     */
+    public static List<Channel> read(String playlist, List<Glob> groups) {
+        List<Glob> wanted = groups == null ? List.of() : groups;
         List<Channel> channels = new ArrayList<>();
+        int skipped = 0;
         for (String rawLine : playlist.split("\\R")) {
             String line = rawLine.trim();
             if (!line.startsWith("#EXTINF")) {
@@ -38,6 +60,7 @@ public final class M3uReader {
             String name = null;
             String logo = null;
             String number = null;
+            String group = null;
             Matcher matcher = ATTRIBUTE.matcher(attributes);
             while (matcher.find()) {
                 switch (matcher.group(1).toLowerCase()) {
@@ -45,6 +68,7 @@ public final class M3uReader {
                     case "tvg-name" -> name = matcher.group(2);
                     case "tvg-logo" -> logo = matcher.group(2);
                     case "tvg-chno" -> number = matcher.group(2);
+                    case "group-title" -> group = matcher.group(2);
                     default -> {
                         // other attributes are not needed
                     }
@@ -54,10 +78,32 @@ public final class M3uReader {
             if (id == null || id.isBlank()) {
                 continue;
             }
+            if (!wanted.isEmpty() && !inAWantedGroup(group, wanted)) {
+                skipped++;
+                continue;
+            }
             channels.add(new Channel(new ChannelId(id), firstNonBlank(name, displayName, id),
                     blankToNull(logo), blankToNull(number), Channel.Origin.PLAYLIST));
         }
+        reportGroups(wanted, channels.size(), skipped);
         return channels;
+    }
+
+    private static boolean inAWantedGroup(String group, List<Glob> wanted) {
+        return group != null && wanted.stream().anyMatch(glob -> glob.matches(group));
+    }
+
+    /**
+     * One line per read, because a whitelist that matches nothing is otherwise indistinguishable from a
+     * playlist that legitimately declares nothing — the same reasoning as the XMLTV exclusion list
+     * (HOU-33). Silence here would let a renamed group empty the registry without a trace.
+     */
+    private static void reportGroups(List<Glob> wanted, int kept, int skipped) {
+        if (wanted.isEmpty()) {
+            return;
+        }
+        log.info("playlist: kept {} channel(s) in group(s) {} and skipped {} entries in other groups",
+                kept, wanted, skipped);
     }
 
     private static String firstNonBlank(String... values) {

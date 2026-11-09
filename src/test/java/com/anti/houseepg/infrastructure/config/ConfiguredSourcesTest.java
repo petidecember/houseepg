@@ -44,6 +44,24 @@ class ConfiguredSourcesTest {
                 .hasMessageContaining("cannot be blank");
     }
 
+    @Test
+    void thePlaylistGroupListIsCompiledTheSameWayAndFailsTheSameWay() {
+        // HOU-45's whitelist and HOU-33's exclusions share one matcher on purpose: two dialects of "which
+        // names do I mean" in one YAML file is a trap. A blank entry must fail the boot here too.
+        HouseEpgProperties properties = new HouseEpgProperties(null, List.of("_=HU=_"), List.of(),
+                Duration.ofDays(7), Duration.ofSeconds(60));
+
+        assertThat(properties.playlistGroupsOr()).extracting(glob -> glob.pattern()).containsExactly("_=HU=_");
+        assertThat(properties.playlistGroupsOr().getFirst().matches("_=HU=_")).isTrue();
+
+        assertThat(new HouseEpgProperties(null, null, List.of(), Duration.ofDays(7), Duration.ofSeconds(60))
+                .playlistGroupsOr()).isEmpty();
+        assertThatThrownBy(() -> new HouseEpgProperties(null, List.of(" "), List.of(),
+                Duration.ofDays(7), Duration.ofSeconds(60)).playlistGroupsOr())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("cannot be blank");
+    }
+
     private static HouseEpgProperties.SourceProperties source(String id, String name,
             List<String> excludedChannelIds) {
         return new HouseEpgProperties.SourceProperties(id, name, "http://" + id + "/epg.xml", null, null,

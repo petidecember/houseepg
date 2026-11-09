@@ -2,6 +2,7 @@ package com.anti.houseepg.application.guide;
 
 import com.anti.houseepg.application.guide.port.EpgSource;
 import com.anti.houseepg.domain.guide.model.SourceId;
+import com.anti.houseepg.domain.guide.policy.Glob;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -10,7 +11,8 @@ import java.util.Optional;
 
 /**
  * What a guide refresh needs to know: the sources in priority order (highest first), the optional
- * playlist that acts as the channel authority, and how long ended programmes are retained.
+ * playlist that acts as the channel authority, which playlist groups it may read, and how long ended
+ * programmes are retained.
  *
  * <p>ADR-0005 makes the configuration authoritative for the lifetime of the process, so the source
  * list is mutable here: a reorder and a configuration reload both change the running merge through
@@ -23,13 +25,25 @@ public final class GuideSettings {
     public static final Duration DEFAULT_RETENTION = Duration.ofDays(7);
 
     private final Optional<String> playlistLocation;
+    private final List<Glob> playlistGroups;
     private final Duration retention;
     private volatile List<EpgSource> sources;
 
-    public GuideSettings(List<EpgSource> sources, Optional<String> playlistLocation, Duration retention) {
+    /**
+     * @param playlistGroups the {@code group-title} groups the playlist may be read from (HOU-45); an
+     *     empty list means every group, which is what an unconfigured playlist has always meant
+     */
+    public GuideSettings(List<EpgSource> sources, Optional<String> playlistLocation, List<Glob> playlistGroups,
+            Duration retention) {
         this.sources = sources == null ? List.of() : List.copyOf(sources);
         this.playlistLocation = playlistLocation == null ? Optional.empty() : playlistLocation;
+        this.playlistGroups = playlistGroups == null ? List.of() : List.copyOf(playlistGroups);
         this.retention = retention == null || retention.isNegative() ? DEFAULT_RETENTION : retention;
+    }
+
+    /** No group filter: every entry in the playlist is a candidate, as before HOU-45. */
+    public GuideSettings(List<EpgSource> sources, Optional<String> playlistLocation, Duration retention) {
+        this(sources, playlistLocation, List.of(), retention);
     }
 
     public GuideSettings(List<EpgSource> sources, Optional<String> playlistLocation) {
@@ -43,6 +57,11 @@ public final class GuideSettings {
 
     public Optional<String> playlistLocation() {
         return playlistLocation;
+    }
+
+    /** The {@code group-title} groups the playlist is read from; empty means every group. */
+    public List<Glob> playlistGroups() {
+        return playlistGroups;
     }
 
     public Duration retention() {

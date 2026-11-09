@@ -62,7 +62,7 @@ public class ReseedRegistry {
         Optional<String> playlist = settings.playlistLocation();
         if (playlist.isPresent()) {
             try {
-                List<Channel> channels = channelAuthority.channels(playlist.get());
+                List<Channel> channels = channelAuthority.channels(playlist.get(), settings.playlistGroups());
                 if (channels.isEmpty()) {
                     log.warn("Channel authority {} returned no channels; nothing to re-seed from", playlist.get());
                     return store.registry();

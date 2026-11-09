@@ -154,7 +154,9 @@ channel it extends (`RTLplus` ≠ `rtl`).
   and then kept across refreshes; a refresh never re-seeds it, and an authority that cannot be read keeps
   the previous registry rather than substituting another source's ids (§6.4, ADR-0002). With a playlist
   that playlist *is* the authority, so it is re-read on every refresh and the store is written only when
-  the declarations it collapses to have actually changed (§6.4, HOU-49).
+  the declarations it collapses to have actually changed (§6.4, HOU-49). A playlist that declares one
+  group of real channels and sixty groups of films offers its authority to all of them; `playlist-groups`
+  (HOU-45) is how the operator says which groups the registry may be read from.
 - Each source channel is matched to a registry channel by the strongest available evidence, in this
   order: the exact source channel id, the exact display name, the normalized id, the normalized
   display name. The M3U decides whether HD and SD are genuinely separate channels (distinct
@@ -165,7 +167,6 @@ channel it extends (`RTLplus` ≠ `rtl`).
   to confirm or correct**. A `CONFIRMED` or `CORRECTED` decision is reused on later refreshes and an
   automatic pass never overwrites it; a decision whose canonical channel no longer exists is stale and
   matching falls back to name lookup.
-- A source channel that matches nothing is kept as a **pass-through channel**: it is emitted with its
 - A source channel that matches nothing is kept as a **pass-through channel**: it is emitted with its
   own id, so nothing is silently dropped, and it is recorded as `UNMATCHED`.
 - **Exclusion (HOU-33) is the one deliberate exception**, and it happens before matching. A source may
@@ -518,6 +519,13 @@ application at a dedicated database.
 - A source may declare `excluded-channel-ids`: glob patterns for the source channel ids it wants
   dropped (§6.2). The list is validated when the configuration is read, so a blank pattern fails the
   boot rather than silently excluding nothing; an entry that matches nothing is logged on the refresh.
+- **The playlist's group filter (HOU-45) is its counterpart on the authority side.** `playlist-groups` is
+  a whitelist of `group-title` values, globs with the same syntax and the same boot validation as the
+  exclusion list, because two dialects of "which names do I mean" in one YAML file is a trap. It is
+  applied inside the playlist reader, before a channel is built, so a film library's hundred thousand
+  entries never become registry candidates. An entry whose `group-title` is absent, empty or unquoted
+  belongs to no group and is dropped once a whitelist is configured. Empty or unconfigured means every
+  group, which is what every playlist did before this existed.
 
 ## 9. HTTP surface
 
@@ -566,6 +574,11 @@ source has credentials, never the credentials themselves.
 - The **exclusion** filter is proved twice: at the reader (`XmltvReaderTest`, a placeholder channel with
   its programme disappears while the rest survives) and at the wiring (`ConfiguredSourcesTest`, the
   patterns compile per source and a blank one fails), so a filter that stops being applied cannot pass.
+- The **playlist group filter** is proved three times: as a pure function (`M3uReaderTest`, a two-group
+  playlist read with and without a whitelist), at the wiring (`ConfiguredSourcesTest`, the `playlist-groups`
+  list compiles into the same matcher and a blank one fails the boot), and end to end
+  (`RefreshGuideTest`, the registry holds only the configured group's ids, and a whitelist that matches
+  nothing keeps the stored registry instead of emptying it).
 - Verification gate before any completion claim: `./gradlew test`, `./gradlew integrationTest`,
   and for UI changes `cd frontend && npx tsc --noEmit && npm run build` with `frontend/dist/*`
   copied into `src/main/resources/static/`.

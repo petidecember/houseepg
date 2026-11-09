@@ -14,6 +14,7 @@ import com.anti.houseepg.domain.guide.model.Programme;
 import com.anti.houseepg.domain.guide.model.SourceHealth;
 import com.anti.houseepg.domain.guide.model.SourceId;
 import com.anti.houseepg.domain.guide.policy.ChannelMatch;
+import com.anti.houseepg.domain.guide.policy.Glob;
 import com.anti.houseepg.domain.guide.policy.MatchConfidence;
 import com.anti.houseepg.domain.guide.policy.MatchState;
 import com.anti.houseepg.domain.guide.policy.SourceChannelRef;
@@ -121,6 +122,23 @@ class RefreshGuideTest {
             """;
 
     /** A playlist naming one {@code tvg-id} twice — the shape the supplied playlist actually has. */
+    /**
+     * The real playlist's shape: every id sits in one group, and a much larger group holds entries the
+     * registry can never use (HOU-45). Unfiltered this reads four channels; filtered to `_=HU=_` it reads
+     * the two the registry is allowed to know about.
+     */
+    private static final String GROUPED_PLAYLIST = """
+            #EXTM3U
+            #EXTINF:-1 tvg-id="ch1.xx" tvg-name="Channel One" group-title="_=HU=_",Channel One HD
+            http://example.invalid/ch1
+            #EXTINF:-1 tvg-id="ch2.xx" tvg-name="Channel Two" group-title="_=HU=_",Channel Two HD
+            http://example.invalid/ch2
+            #EXTINF:-1 tvg-id="film1.xx" tvg-name="Film One" group-title="Film sorozatok",Film One
+            http://example.invalid/film1
+            #EXTINF:-1 tvg-id="film2.xx" tvg-name="Film Two" group-title="Film sorozatok",Film Two
+            http://example.invalid/film2
+            """;
+
     private static final String PLAYLIST_WITH_REPEATS = """
             #EXTM3U
             #EXTINF:-1 tvg-id="ch1.xx" tvg-name="Channel One",Channel One HD
@@ -162,6 +180,7 @@ class RefreshGuideTest {
         server.createContext("/a.xml", exchange -> respond(exchange, 200, SOURCE_A));
         server.createContext("/repeating.xml", exchange -> respond(exchange, 200, SOURCE_REPEATING));
         server.createContext("/dup-playlist.m3u", exchange -> respond(exchange, 200, servedPlaylist.get()));
+        server.createContext("/grouped-playlist.m3u", exchange -> respond(exchange, 200, GROUPED_PLAYLIST));
         server.createContext("/b.xml.gz", exchange -> {
             if (sourceBFails.get()) {
                 respond(exchange, 503, "unavailable");
@@ -389,6 +408,53 @@ class RefreshGuideTest {
     }
 
 
+    @Test
+    void aGroupFilterDecidesWhichPlaylistIdsReachTheRegistry() {
+        // End to end through the real adapter: the ids in the film group never become registry channels,
+        // so they can neither be matched nor emitted (HOU-45, ADR-0002 unchanged: the ids that remain are
+        // byte-for-byte the ids the playlist declared).
+        GuideSettings unfiltered = new GuideSettings(
+                List.of(EpgSource.of("a", "Source A", base + "/a.xml", Credentials.none())),
+                Optional.of(base + "/grouped-playlist.m3u"));
+        refreshGuide(unfiltered).refresh();
+        assertThat(guideStore.registry()).extracting(channel -> channel.id().value())
+                .containsExactly("ch1.xx", "ch2.xx", "film1.xx", "film2.xx");
+    }
+
+    @Test
+    void aGroupFilterKeepsOnlyTheConfiguredGroup() {
+        GuideSettings settings = new GuideSettings(
+                List.of(EpgSource.of("a", "Source A", base + "/a.xml", Credentials.none())),
+                Optional.of(base + "/grouped-playlist.m3u"),
+                Glob.allOf(List.of("_=HU=_")), Duration.ofDays(7));
+        refreshGuide(settings).refresh();
+
+        assertThat(guideStore.registry()).extracting(channel -> channel.id().value())
+                .containsExactly("ch1.xx", "ch2.xx");
+    }
+
+    @Test
+    void aGroupFilterThatMatchesNothingKeepsTheStoredRegistryInsteadOfEmptyingIt() {
+        // The card asked for the opposite; the shipped rule is the one that cannot cost a DVR its ids.
+        // A typo must be loud, not destructive, so the stored registry survives and a warning names the
+        // groups that matched nothing.
+        GuideSettings filtered = new GuideSettings(
+                List.of(EpgSource.of("a", "Source A", base + "/a.xml", Credentials.none())),
+                Optional.of(base + "/grouped-playlist.m3u"), Glob.allOf(List.of("_=HU=_")), Duration.ofDays(7));
+        refreshGuide(filtered).refresh();
+        List<String> before = guideStore.registry().stream().map(channel -> channel.id().value()).toList();
+
+        GuideSettings typo = new GuideSettings(
+                List.of(EpgSource.of("a", "Source A", base + "/a.xml", Credentials.none())),
+                Optional.of(base + "/grouped-playlist.m3u"), Glob.allOf(List.of("no-such-group")),
+                Duration.ofDays(7));
+        refreshGuide(typo).refresh();
+
+        assertThat(before).containsExactly("ch1.xx", "ch2.xx");
+        assertThat(guideStore.registry()).extracting(channel -> channel.id().value())
+                .containsExactly("ch1.xx", "ch2.xx");
+    }
+
     private RefreshGuide refreshGuide(String url, Optional<String> playlistLocation) {
         GuideSettings settings = new GuideSettings(
                 List.of(EpgSource.of("a", "Source A", base + url, Credentials.none())), playlistLocation);
@@ -410,7 +476,7 @@ class RefreshGuideTest {
 
     private RefreshGuide refreshGuide(GuideSettings settings) {
         HouseEpgProperties properties =
-                new HouseEpgProperties(null, List.of(), Duration.ofDays(7), Duration.ofSeconds(10));
+                new HouseEpgProperties(null, List.of(), List.of(), Duration.ofDays(7), Duration.ofSeconds(10));
         HttpFetcher fetcher = new HttpFetcher(properties);
         return new RefreshGuide(settings, new HttpEpgSourceGateway(fetcher, new XmltvReader(), guideStore),
                 new M3uChannelAuthority(fetcher), matchStore, guideStore, Clock.fixed(FIXTURE_NOW, ZoneOffset.UTC));

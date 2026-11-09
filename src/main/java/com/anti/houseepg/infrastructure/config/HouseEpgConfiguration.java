@@ -42,7 +42,7 @@ public class HouseEpgConfiguration {
     @Bean
     GuideSettings guideSettings(HouseEpgProperties properties) {
         return new GuideSettings(ConfiguredSources.toSources(properties.enabledSources()),
-                Optional.ofNullable(properties.playlistUrl()), properties.retention());
+                Optional.ofNullable(properties.playlistUrl()), properties.playlistGroupsOr(), properties.retention());
     }
 
     /**
