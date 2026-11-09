@@ -7,9 +7,11 @@ import com.anti.houseepg.application.guide.port.SourceUnavailableException;
 import com.anti.houseepg.domain.guide.model.SourceEpg;
 import com.anti.houseepg.domain.guide.model.SourceId;
 import com.anti.houseepg.domain.guide.model.SourceProgramme;
+import com.anti.houseepg.domain.guide.policy.Glob;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class XmltvReaderTest {
@@ -75,6 +77,66 @@ class XmltvReaderTest {
         assertThatThrownBy(() -> new XmltvReader().read(SOURCE, stream("<tv><channel")))
                 .isInstanceOf(SourceUnavailableException.class)
                 .hasMessageContaining("could not parse");
+    }
+
+    /** The provider's own template channel, verbatim from a real feed, plus a normal one. */
+    private static final String DOCUMENT_WITH_A_PLACEHOLDER = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <tv>
+              <channel id="channel_id">
+                <display-name>stream_display_name</display-name>
+                <icon src="stream_icon"/>
+              </channel>
+              <channel id="hirtv.hu">
+                <display-name>Hír TV</display-name>
+              </channel>
+              <programme start="20261029164000 +0000" stop="20261029170000 +0000" channel="channel_id">
+                <title>Placeholder programme</title>
+              </programme>
+              <programme start="20261029170000 +0000" stop="20261029180000 +0000" channel="hirtv.hu">
+                <title>Híradó</title>
+              </programme>
+            </tv>
+            """;
+
+    @Test
+    void keepsAProviderPlaceholderWhenNothingIsExcluded() {
+        // The reader is not the filter: without a configured exclusion the placeholder is ordinary data.
+        SourceEpg epg = new XmltvReader().read(SOURCE, stream(DOCUMENT_WITH_A_PLACEHOLDER));
+
+        assertThat(epg.channels()).extracting(channel -> channel.id())
+                .containsExactly("channel_id", "hirtv.hu");
+        assertThat(epg.programmes()).hasSize(2);
+    }
+
+    @Test
+    void dropsAnExcludedChannelAndItsProgrammes() {
+        SourceEpg epg = new XmltvReader().read(SOURCE, stream(DOCUMENT_WITH_A_PLACEHOLDER),
+                Glob.allOf(List.of("channel_id")));
+
+        assertThat(epg.channels()).extracting(channel -> channel.id()).containsExactly("hirtv.hu");
+        assertThat(epg.programmes()).singleElement()
+                .satisfies(programme -> assertThat(programme.title()).isEqualTo("Híradó"));
+        assertThat(epg.programmes()).noneMatch(programme -> programme.sourceChannelId().equals("channel_id"));
+    }
+
+    @Test
+    void dropsAWholeFamilyOfPlaceholdersByGlob() {
+        SourceEpg epg = new XmltvReader().read(SOURCE, stream(DOCUMENT_WITH_A_PLACEHOLDER),
+                Glob.allOf(List.of("stream_*", "channel_*")));
+
+        assertThat(epg.channels()).extracting(channel -> channel.id()).containsExactly("hirtv.hu");
+        assertThat(epg.programmes()).hasSize(1);
+    }
+
+    @Test
+    void anExclusionThatMatchesNothingChangesNothing() {
+        SourceEpg epg = new XmltvReader().read(SOURCE, stream(DOCUMENT_WITH_A_PLACEHOLDER),
+                Glob.allOf(List.of("no-such-channel")));
+
+        assertThat(epg.channels()).extracting(channel -> channel.id())
+                .containsExactly("channel_id", "hirtv.hu");
+        assertThat(epg.programmes()).hasSize(2);
     }
 
     private static ByteArrayInputStream stream(String xml) {

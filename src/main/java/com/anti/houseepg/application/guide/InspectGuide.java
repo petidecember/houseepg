@@ -34,8 +34,28 @@ public class InspectGuide {
 
     /** The canonical channels the feed can emit, with every match row and the source channel behind it. */
     public Registry registry() {
+        Map<SourceChannelRef, SourceChannel> sourceChannels = sourceChannels(matchStore.decisions());
+        return new Registry(store.registry(), stillDeclared(sourceChannels), sourceChannels);
+    }
+
+    /**
+     * Keeps only the match rows whose source channel the source still declares.
+     *
+     * <p>A match row is written the first time a source channel is seen and never deleted, so the rows of
+     * a channel that has since disappeared — an operator exclusion (HOU-33) is the usual reason — would
+     * otherwise live on in Match review as a row with no source channel behind it, offering a decision
+     * about something that no longer exists.
+     *
+     * <p>A source whose normalized document is gone entirely contributes no source channels at all, and
+     * that is not evidence the channel has disappeared: the rows are then kept so a review list survives
+     * a source that is merely failing, exactly as before.
+     */
+    private List<ChannelMatch> stillDeclared(Map<SourceChannelRef, SourceChannel> sourceChannels) {
         List<ChannelMatch> matches = matchStore.decisions();
-        return new Registry(store.registry(), matches, sourceChannels(matches));
+        return matches.stream()
+                .filter(match -> sourceChannels.containsKey(match.source())
+                        || store.normalized(match.source().source()).isEmpty())
+                .toList();
     }
 
     /** The source channel behind one match row, when its normalized document is still stored. */

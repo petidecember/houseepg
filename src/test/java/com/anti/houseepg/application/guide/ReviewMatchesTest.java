@@ -51,6 +51,37 @@ class ReviewMatchesTest {
     }
 
     @Test
+    void anExcludedChannelLeavesNoRowBehind() {
+        // HOU-33: a match row outlives the channel it was made for, so a row whose source channel the
+        // source no longer declares must not sit in the list offering a decision about something gone.
+        InMemoryGuideStore store = new InMemoryGuideStore();
+        InMemoryChannelMatchStore matches = new InMemoryChannelMatchStore();
+        store.saveRegistry(List.of(channel("amc.xx", "AMC")));
+        store.saveNormalized(new SourceEpg(A, List.of(sourceChannel("amc.xx", "AMC")), List.of()), Map.of());
+        matches.saveAuto(List.of(
+                ChannelMatch.auto(ref("amc.xx"), new ChannelId("amc.xx"), MatchConfidence.EXACT_ID),
+                ChannelMatch.auto(ref("gone.xx"), new ChannelId("amc.xx"), MatchConfidence.NORMALIZED_NAME)));
+        ReviewMatches list = new ReviewMatches(new InspectGuide(store, matches));
+
+        assertThat(sources(list.review(false, ReviewMatches.Filter.ALL))).containsExactly("amc.xx");
+        assertThat(sources(list.review(false, ReviewMatches.Filter.NEEDS_DECISION))).doesNotContain("gone.xx");
+    }
+
+    @Test
+    void aRowIsKeptWhileItsSourceIsMerelyMissing() {
+        // A source that is failing contributes no document at all, and that is not evidence its channels
+        // have disappeared — the review list must survive a broken source.
+        InMemoryGuideStore store = new InMemoryGuideStore();
+        InMemoryChannelMatchStore matches = new InMemoryChannelMatchStore();
+        store.saveRegistry(List.of(channel("amc.xx", "AMC")));
+        matches.saveAuto(List.of(
+                ChannelMatch.auto(ref("amc.xx"), new ChannelId("amc.xx"), MatchConfidence.EXACT_ID)));
+        ReviewMatches list = new ReviewMatches(new InspectGuide(store, matches));
+
+        assertThat(sources(list.review(false, ReviewMatches.Filter.ALL))).containsExactly("amc.xx");
+    }
+
+    @Test
     void theDefaultListHidesCuratedRows() {
         assertThat(sources(review.review(false, ReviewMatches.Filter.NEEDS_DECISION)))
                 .doesNotContain("curated.xx");

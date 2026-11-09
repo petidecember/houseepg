@@ -36,7 +36,8 @@ public record HouseEpgProperties(
             String headerName,
             String headerValue,
             Boolean enabled,
-            Duration refreshInterval) {
+            Duration refreshInterval,
+            List<String> excludedChannelIds) {
 
         /** Design §8: 8 h unless configured otherwise. */
         public Duration refreshIntervalOr() {
@@ -46,9 +47,16 @@ public record HouseEpgProperties(
         public boolean isEnabled() {
             return enabled == null || enabled;
         }
-
         public String displayName() {
             return name == null || name.isBlank() ? id : name;
+        }
+
+        /**
+         * Glob patterns for source channel ids this source declares and the operator does not want
+         * (design §6.2, HOU-33). Empty by default: nothing is excluded unless it is asked for.
+         */
+        public List<String> excludedChannelIdsOr() {
+            return excludedChannelIds == null ? List.of() : List.copyOf(excludedChannelIds);
         }
     }
 }

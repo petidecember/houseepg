@@ -35,7 +35,11 @@ public class HttpEpgSourceGateway implements EpgSourceGateway {
     @Override
     public SourceEpg read(EpgSource source) {
         byte[] payload = fetcher.fetch(source.location(), source.credentials());
-        SourceEpg document = reader.read(source.id(), new ByteArrayInputStream(payload));
+        // The source carries its own exclusion list, so the filter belongs to the same object that names
+        // the source: it is read here and nowhere else, and the raw snapshot below still keeps the
+        // payload verbatim (a diagnosis aid, not the product).
+        SourceEpg document = reader.read(source.id(), new ByteArrayInputStream(payload),
+                source.excludedChannelIds());
         keepRawSnapshot(source, payload);
         return document;
     }

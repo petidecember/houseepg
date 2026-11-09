@@ -166,7 +166,22 @@ channel it extends (`RTLplus` ≠ `rtl`).
   automatic pass never overwrites it; a decision whose canonical channel no longer exists is stale and
   matching falls back to name lookup.
 - A source channel that matches nothing is kept as a **pass-through channel**: it is emitted with its
+- A source channel that matches nothing is kept as a **pass-through channel**: it is emitted with its
   own id, so nothing is silently dropped, and it is recorded as `UNMATCHED`.
+- **Exclusion (HOU-33) is the one deliberate exception**, and it happens before matching. A source may
+  list glob patterns under `excluded-channel-ids`; a source channel whose id matches one of them is
+  dropped together with its programmes, inside the reader, so it never reaches the model, the matcher,
+  the store or the review list. A provider's own unsubstituted template — `channel_id`,
+  `stream_display_name`, `stream_icon` — is a real declaration in several public feeds and is exactly
+  what this is for. Patterns are per source (an id means nothing outside the source that declared it),
+  match on the id only, are case-insensitive, and treat `*` and `?` as wildcards with every other
+  character literal. An invalid or blank pattern fails the boot; a list that matches nothing is logged,
+  because the usual cause is a typo and the effect is otherwise invisible. Empty ids are dropped
+  without any configuration — that is the reader's existing rule, not an exclusion.
+- A match row is only kept while its source still declares the channel: a decision outlives the channel
+  it was made for, and an exclusion must not leave a row behind offering to decide about something that
+  has disappeared. A source whose document is missing altogether is a different case — it may be
+  failing, so its rows are kept.
 
 ### 6.3 Merge — per-channel timeline claim
 
@@ -500,6 +515,9 @@ application at a dedicated database.
 - On **failure, timeout, or empty/unparseable response**: the source keeps its **last good data**,
   is marked **unhealthy** in the UI, and the **served guide never degrades because of a network
   error**. Stale-but-rich beats fresh-but-missing here, deliberately.
+- A source may declare `excluded-channel-ids`: glob patterns for the source channel ids it wants
+  dropped (§6.2). The list is validated when the configuration is read, so a blank pattern fails the
+  boot rather than silently excluding nothing; an entry that matches nothing is logged on the refresh.
 
 ## 9. HTTP surface
 
@@ -545,6 +563,9 @@ source has credentials, never the credentials themselves.
 - An **`integrationTest` Gradle task** (required by `AGENTS.md`) that boots the real application on a
   random port, points its sources at a **stub HTTP server** serving the fixtures, and asserts the feed
   it serves against the same golden file. MongoDB-backed cases arrive with persistence (slice 4).
+- The **exclusion** filter is proved twice: at the reader (`XmltvReaderTest`, a placeholder channel with
+  its programme disappears while the rest survives) and at the wiring (`ConfiguredSourcesTest`, the
+  patterns compile per source and a blank one fails), so a filter that stops being applied cannot pass.
 - Verification gate before any completion claim: `./gradlew test`, `./gradlew integrationTest`,
   and for UI changes `cd frontend && npx tsc --noEmit && npm run build` with `frontend/dist/*`
   copied into `src/main/resources/static/`.

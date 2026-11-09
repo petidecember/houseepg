@@ -6,15 +6,20 @@ import com.anti.houseepg.domain.guide.model.SourceChannel;
 import com.anti.houseepg.domain.guide.model.SourceEpg;
 import com.anti.houseepg.domain.guide.model.SourceId;
 import com.anti.houseepg.domain.guide.model.SourceProgramme;
+import com.anti.houseepg.domain.guide.policy.Glob;
 import com.anti.houseepg.infrastructure.xmltv.XmltvTime;
 import java.io.InputStream;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
@@ -25,7 +30,25 @@ import org.springframework.stereotype.Component;
 @Component
 public class XmltvReader {
 
+    private static final Logger log = LoggerFactory.getLogger(XmltvReader.class);
+
+    /** Reads a document with nothing excluded — the configured source says which ids it wants gone. */
     public SourceEpg read(SourceId source, InputStream input) {
+        return read(source, input, List.of());
+    }
+
+    /**
+     * Reads a document, dropping the channels whose id matches one of {@code excludedChannelIds} and
+     * every programme that belonged to them (design §6.2, HOU-33). The filter is applied here, at the
+     * anti-corruption boundary, so an excluded channel never reaches the model, the match pass or the
+     * store — it cannot come back as an unmatched review row either.
+     *
+     * <p>The drop is all-or-nothing per channel: a programme whose channel id is excluded is dropped
+     * even when the matching declaration was itself dropped for the same reason, and a programme whose
+     * channel was never declared is left alone for the existing invariant check to catch.
+     */
+    public SourceEpg read(SourceId source, InputStream input, List<Glob> excludedChannelIds) {
+        List<Glob> exclusions = excludedChannelIds == null ? List.of() : excludedChannelIds;
         XMLInputFactory factory = XMLInputFactory.newFactory();
         factory.setProperty(XMLInputFactory.SUPPORT_DTD, Boolean.FALSE);
         factory.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, Boolean.FALSE);
@@ -33,6 +56,8 @@ public class XmltvReader {
 
         List<SourceChannel> channels = new ArrayList<>();
         List<SourceProgramme> programmes = new ArrayList<>();
+        Set<String> excluded = new LinkedHashSet<>();
+        int droppedProgrammes = 0;
 
         try {
             XMLStreamReader reader = factory.createXMLStreamReader(input);
@@ -44,15 +69,25 @@ public class XmltvReader {
                     switch (reader.getLocalName()) {
                         case "channel" -> {
                             SourceChannel channel = readChannel(reader);
-                            if (channel != null) {
+                            if (channel != null && !isExcluded(channel.id(), exclusions)) {
                                 channels.add(channel);
+                            } else if (channel != null) {
+                                excluded.add(channel.id());
                             }
                         }
                         case "programme" -> {
                             SourceProgramme programme = readProgramme(reader);
-                            if (programme != null) {
-                                programmes.add(programme);
+                            if (programme == null) {
+                                continue;
                             }
+                            // An excluded channel takes its programmes with it. This also has to cover a
+                            // programme whose declaration was dropped for the same reason, so the id is
+                            // asked about directly rather than the entry being looked up in `excluded`.
+                            if (isExcluded(programme.sourceChannelId(), exclusions)) {
+                                droppedProgrammes++;
+                                continue;
+                            }
+                            programmes.add(programme);
                         }
                         default -> {
                             // <tv> and anything else this adapter does not need.
@@ -66,7 +101,31 @@ public class XmltvReader {
             throw new SourceUnavailableException("could not parse the document: " + e.getMessage(), e);
         }
 
+        reportExclusions(source, exclusions, excluded, droppedProgrammes);
         return new SourceEpg(source, channels, programmes);
+    }
+
+    private static boolean isExcluded(String channelId, List<Glob> exclusions) {
+        return exclusions.stream().anyMatch(glob -> glob.matches(channelId));
+    }
+
+    /**
+     * The operator asked for these channels to disappear, so this is not a failure — but a list that
+     * matched nothing is worth a word, because the usual reason is a typo and the effect is invisible
+     * (HOU-33). One line per refresh either way.
+     */
+    private static void reportExclusions(SourceId source, List<Glob> exclusions, Set<String> excluded,
+            int droppedProgrammes) {
+        if (exclusions.isEmpty()) {
+            return;
+        }
+        if (excluded.isEmpty()) {
+            log.warn("{}: none of the {} configured exclusion pattern(s) matched a channel: {}",
+                    source.value(), exclusions.size(), exclusions);
+            return;
+        }
+        log.info("{}: excluded {} channel(s) and dropped {} programme(s) for them, by pattern {}: {}",
+                source.value(), excluded.size(), droppedProgrammes, exclusions, excluded);
     }
 
     private static SourceChannel readChannel(XMLStreamReader reader) throws XMLStreamException {

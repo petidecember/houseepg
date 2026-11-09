@@ -2,6 +2,7 @@ package com.anti.houseepg.infrastructure.config;
 
 import com.anti.houseepg.application.guide.port.Credentials;
 import com.anti.houseepg.application.guide.port.EpgSource;
+import com.anti.houseepg.domain.guide.policy.Glob;
 import java.util.List;
 
 /**
@@ -16,7 +17,7 @@ final class ConfiguredSources {
     static List<EpgSource> toSources(List<HouseEpgProperties.SourceProperties> sources) {
         return sources.stream()
                 .map(source -> EpgSource.of(source.id(), source.name(), source.url(), credentials(source),
-                        source.refreshIntervalOr()))
+                        source.refreshIntervalOr(), Glob.allOf(source.excludedChannelIdsOr())))
                 .toList();
     }
 
