@@ -1,0 +1,94 @@
+# Copy this and point the application at your copy:
+#   cp config/houseepg.example.yaml config/houseepg.yaml
+#   java -jar houseepg.jar --spring.config.location=file:config/houseepg.yaml
+# or, from a checkout:
+#   ./gradlew bootRun --args="--spring.config.location=file:config/houseepg.yaml"
+#
+# A minimal config needs only `spring.application.name` and `houseepg.sources`.
+
+spring:
+  application:
+    name: houseepg
+
+server:
+  # Where the web UI, /xmltv and the REST API are served. Default 8000.
+  port: 8000
+
+houseepg:
+  # An M3U/M3U8 playlist URL. When set, its tvg-ids become the emitted XMLTV channel ids.
+  # Omit it and the registry is seeded once from the top-priority XMLTV source below instead.
+  # playlist-url: "http://example.com/get.php?username=USER&password=PASS&type=m3u_plus&output=m3u8"
+
+  # Only read entries whose group-title matches one of these globs. Matching is case-insensitive.
+  # An entry with no group-title is kept only when no list is configured.
+  # playlist-groups:
+  #   - "DE"
+  #   - "Germany*"
+
+  # The order here is the merge/priority order.
+  # Drag them in the UI to change the order; with `config-file` set below, the new order is written back here.
+  sources:
+    # `id` is the stable name used in logs, the API and the stored data. It is part of the
+    # merge order, so renaming it is a configuration change like any other.
+  - id: my-provider
+
+    # Shown in the UI and in warnings. Defaults to the id.
+    name: My Provider
+
+    # The XMLTV URL. http/https only. `.xml` and `.xml.gz` are both fine.
+    url: "http://example.com/xmltv.php?username=USER&password=PASS"
+
+    # Only fetch every 8h by default. Shorten it for a provider that updates often.
+    # refresh-interval: 8h
+
+    # Set to false to keep the entry in the file but leave it invisible to the application.
+    enabled: true
+
+    # HTTP Basic credentials, if the provider needs them. Use the URL's own query
+    # parameters instead when the provider takes them there, as most IPTV panels do.
+    # username: USER
+    # password: PASS
+
+    # Or an arbitrary header, for providers that authenticate some other way. Setting
+    # header-name disables the Basic credentials above.
+    # header-name: "X-Api-Key"
+    # header-value: "SECRET"
+
+    # Channel ids from THIS source that should be dropped before anything else looks at them. Each entry is a glob.
+    # Useful for a provider that ships its own unsubstituted template as a channel, or a wall of placeholder ids.
+    # excluded-channel-ids:
+    #   - "channel_id"
+    #   - "stream_*"
+
+  # A second source.
+  - id: another-provider
+    name: Another Provider
+    url: "https://example.org/epg.xml.gz"
+    refresh-interval: 12h
+    enabled: false
+
+  # Programmes that ended longer ago than this are dropped from the store.
+  # Default 7d.
+  retention: 7d
+
+  # How long a single source fetch may take before it is treated as unavailable.
+  # Default 60s.
+  timeout: 60s
+
+  # Where Spring Boot looks for this file is the `--spring.config.location` argument; where the
+  # application writes a reorder of the sources back is set here. Point both at the same
+  # file or a reorder from the UI will be written somewhere the next boot does not read.
+  # Leave it empty and a reorder lasts only until the process is restarted.
+  config-file: ${HOUSEEPG_CONFIG_FILE:config/houseepg.yaml}
+
+  # The background refresh loop. `initial-delay` is how long to wait after boot before the
+  # first pass; `tick` is how often it re-checks whether a source is due.
+  # Defaults: 5s and 60s.
+  scheduler:
+    initial-delay: 5s
+    tick: 60s
+
+  # The MongoDB database the guide is stored in.
+  # Default `houseepg`.
+  mongodb:
+    database: houseepg

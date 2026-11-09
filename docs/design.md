@@ -611,6 +611,12 @@ No Docker anywhere. MongoDB runs as a **locally installed service**; HouseEPG ru
 jar**; the `integrationTest` suite runs against that local MongoDB and **must target a dedicated test
 database** so it never touches real guide data.
 
+`config/houseepg.example.yaml` is the complete option reference: every key the application reads, its
+default, and a line or two on when it matters. It is deliberately the only place the option list is
+written down — a duplicate in the README would drift — and it is kept runnable, so the documented set
+is never aspirational. The packaged `application.yaml` is a working configuration, not a reference:
+its values point at real providers and it is not meant to be read as documentation.
+
 ## 13. Risks and accepted tradeoffs
 
 | Risk / tradeoff | Note |
