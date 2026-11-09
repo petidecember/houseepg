@@ -52,6 +52,7 @@ public class MongoGuideStore implements GuideStore {
     static final String GUIDE_MARKERS = "guideMarkers";
     static final String SOURCE_HEALTH = "sourceHealth";
     static final String SOURCE_LOSSES = "sourceLosses";
+    static final String SOURCE_CHANNELS = "sourceChannels";
     static final String GUIDE_MARKER_ID = "merged";
 
     private static final Logger log = LoggerFactory.getLogger(MongoGuideStore.class);
@@ -85,6 +86,8 @@ public class MongoGuideStore implements GuideStore {
             programmes().createIndex(Indexes.compoundIndex(Indexes.ascending("sourceId"),
                     Indexes.ascending("canonicalChannelId")));
             programmes().createIndex(Indexes.ascending("stop"));
+            sourceChannels().createIndex(Indexes.compoundIndex(Indexes.ascending("sourceId"),
+                    Indexes.ascending("sourceChannelId")), new IndexOptions().unique(true));
             mergedProgrammes().createIndex(Indexes.compoundIndex(Indexes.ascending("channelId"),
                     Indexes.ascending("start")));
         } catch (RuntimeException e) {
@@ -99,6 +102,10 @@ public class MongoGuideStore implements GuideStore {
 
     private MongoCollection<Document> programmes() {
         return collection(PROGRAMMES);
+    }
+
+    private MongoCollection<Document> sourceChannels() {
+        return collection(SOURCE_CHANNELS);
     }
 
     private MongoCollection<Document> mergedProgrammes() {
@@ -129,17 +136,34 @@ public class MongoGuideStore implements GuideStore {
                 new ReplaceOptions().upsert(true));
     }
 
+    /**
+     * The channel declarations are read from their own collection, so a declared channel that publishes no
+     * programme still survives the round trip (HOU-39). Before that collection existed the declarations were
+     * not stored at all and were rebuilt from the programme rows, which silently dropped exactly those
+     * channels — the fallback below is what an un-migrated database gets. The two paths in the code that ask
+     * "what does this source declare?" (the seed and the re-seed) therefore now read one truth, and this
+     * fallback only keeps a database written by an older build working until its next refresh fills it in.
+     */
     @Override
     public Optional<SourceEpg> normalized(SourceId source) {
         ensureIndexes();
         List<Document> rows = programmes().find(eq("sourceId", source.value())).into(new ArrayList<>());
-        if (rows.isEmpty()) {
+        List<Document> declarations = sourceChannels().find(eq("sourceId", source.value())).into(new ArrayList<>());
+        if (rows.isEmpty() && declarations.isEmpty()) {
             return Optional.empty();
         }
         Map<String, SourceChannel> channels = new LinkedHashMap<>();
+        for (Document declaration : declarations) {
+            String id = declaration.getString("sourceChannelId");
+            if (id != null) {
+                channels.putIfAbsent(id, new SourceChannel(id, declaration.getString("sourceChannelName"),
+                        declaration.getString("sourceChannelIconUrl")));
+            }
+        }
         List<SourceProgramme> restored = new ArrayList<>();
         for (Document row : rows) {
             String sourceChannelId = row.getString("sourceChannelId");
+            // A programme whose declaration is missing — the un-migrated case — still brings its channel in.
             channels.computeIfAbsent(sourceChannelId,
                     key -> new SourceChannel(key, row.getString("sourceChannelName"), null));
             restored.add(new SourceProgramme(sourceChannelId, slot(row), row.getString("title"),
@@ -153,8 +177,25 @@ public class MongoGuideStore implements GuideStore {
     public void saveNormalized(SourceEpg document, Map<SourceChannelRef, ChannelId> canonicalIds) {
         ensureIndexes();
         programmes().deleteMany(eq("sourceId", document.source().value()));
+        sourceChannels().deleteMany(eq("sourceId", document.source().value()));
         Map<String, String> names = new LinkedHashMap<>();
         document.channels().forEach(channel -> names.put(channel.id(), channel.displayName()));
+        // One row per declaration id, first one wins. The store reads declarations back the same way, so a
+        // provider that names an id twice describes one channel here too — a unique index would otherwise turn
+        // a repeated declaration into a failed write, which is the failure mode this layer must not have
+        // (HOU-32 for the registry, HOU-39 for this collection).
+        Map<String, SourceChannel> declared = new LinkedHashMap<>();
+        document.channels().forEach(channel -> declared.putIfAbsent(channel.id(), channel));
+        List<Document> declarations = declared.values().stream()
+                .map(channel -> new Document()
+                        .append("sourceId", document.source().value())
+                        .append("sourceChannelId", channel.id())
+                        .append("sourceChannelName", channel.displayName())
+                        .append("sourceChannelIconUrl", channel.iconUrl()))
+                .toList();
+        if (!declarations.isEmpty()) {
+            sourceChannels().insertMany(declarations);
+        }
         List<Document> rows = document.programmes().stream()
                 .map(programme -> new Document()
                         .append("sourceId", document.source().value())

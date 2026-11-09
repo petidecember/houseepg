@@ -3,6 +3,7 @@ package com.anti.houseepg;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.anti.houseepg.application.config.ReseedRegistry;
 import com.anti.houseepg.application.guide.GuideSettings;
 import com.anti.houseepg.application.guide.RefreshGuide;
 import com.anti.houseepg.application.guide.RefreshResult;
@@ -15,6 +16,7 @@ import com.anti.houseepg.domain.guide.model.Slot;
 import com.anti.houseepg.domain.guide.model.SourceChannel;
 import com.anti.houseepg.domain.guide.model.SourceEpg;
 import com.anti.houseepg.domain.guide.model.SourceHealth;
+import com.anti.houseepg.domain.guide.model.SourceId;
 import com.anti.houseepg.domain.guide.model.SourceProgramme;
 import com.anti.houseepg.domain.guide.policy.ChannelMatch;
 import com.anti.houseepg.domain.guide.policy.MatchConfidence;
@@ -198,6 +200,135 @@ class MongoPersistenceIntegrationTest {
                 .containsExactly("bravo.xx");
     }
 
+    @Test
+    void aDeclaredChannelThatPublishesNoProgrammeSurvivesTheRoundTrip() {
+        // The whole of HOU-39: "what does this source declare?" must have one answer, and a channel the
+        // source names but never publishes for is still declared. Before the declarations had their own
+        // collection this channel was rebuilt from the programme rows, which by definition do not mention it.
+        SourceEpg document = new SourceEpg(new SourceId("a"),
+                List.of(new SourceChannel("Duck TV.hu", "Duck TV", "https://example.invalid/duck.png"),
+                        new SourceChannel("AMC (HD).hu", "AMC", null)),
+                List.of(programme("AMC (HD).hu", 1, 2, "Show Alpha")));
+
+        guideStore.saveNormalized(document, Map.of());
+
+        SourceEpg restored = guideStore.normalized(A.id()).orElseThrow();
+        // The set is what matters, not the order: the read is served by the (sourceId, sourceChannelId) index,
+        // so MongoDB returns it in index order rather than declaration order. Ids are the identity (ADR-0002).
+        assertThat(restored.channels()).extracting(SourceChannel::id)
+                .containsExactlyInAnyOrder("Duck TV.hu", "AMC (HD).hu");
+        assertThat(restored.channels())
+                .filteredOn(channel -> channel.id().equals("Duck TV.hu"))
+                .singleElement()
+                .satisfies(channel -> {
+                    assertThat(channel.displayName()).isEqualTo("Duck TV");
+                    assertThat(channel.iconUrl()).isEqualTo("https://example.invalid/duck.png");
+                });
+        // The programmes are unaffected: the declaration list is additional, not a replacement.
+        assertThat(restored.programmes()).extracting(SourceProgramme::title).containsExactly("Show Alpha");
+    }
+
+    @Test
+    void aSourceThatPublishesNothingAtAllIsStillStoredAndStillRestored() {
+        // A source can declare channels and publish no programmes for any of them. Storing that document is
+        // what makes the seed reproducible afterwards rather than a one-off read of a live fetch.
+        SourceEpg document = new SourceEpg(new SourceId("a"),
+                List.of(new SourceChannel("hirtv.hu", "Hír TV", null)), List.of());
+
+        guideStore.saveNormalized(document, Map.of());
+
+        assertThat(guideStore.normalized(A.id()).orElseThrow().channels())
+                .extracting(SourceChannel::id).containsExactly("hirtv.hu");
+    }
+
+    @Test
+    void theDeclarationsAreIndexedPerSource() {
+        guideStore.saveNormalized(new SourceEpg(new SourceId("a"),
+                List.of(new SourceChannel("AMC (HD).hu", "AMC", null)), List.of()), Map.of());
+
+        assertThat(indexNames("sourceChannels")).contains("sourceId_1_sourceChannelId_1");
+    }
+
+    @Test
+    void aDatabaseWrittenByAnOlderBuildIsBackfilledByTheNextRefresh() {
+        // The migration story, proven rather than asserted: an existing database has programme rows and no
+        // declarations, so its programme-less channels are simply not there yet. The next refresh writes the
+        // declarations it fetched, and from then on the round trip is complete. Nothing is deleted, and the
+        // registry the older build seeded is untouched.
+        DB.getCollection("programmes").insertOne(new Document()
+                .append("sourceId", "a").append("sourceChannelId", "AMC (HD).hu")
+                .append("sourceChannelName", "AMC").append("canonicalChannelId", "amc.xx")
+                .append("start", new java.util.Date()).append("stop", new java.util.Date(System.currentTimeMillis()
+                        + java.time.Duration.ofHours(2).toMillis()))
+                .append("title", "Show Alpha"));
+        assertThat(DB.getCollection("sourceChannels").countDocuments()).isZero();
+
+        // Before the refresh the old fallback answers, which is the pre-change behaviour exactly.
+        assertThat(guideStore.normalized(A.id()).orElseThrow().channels()).extracting(SourceChannel::id)
+                .containsExactly("AMC (HD).hu");
+
+        documents.put("a", new SourceEpg(new SourceId("a"),
+                List.of(new SourceChannel("AMC (HD).hu", "AMC", null),
+                        new SourceChannel("Duck TV.hu", "Duck TV", null)),
+                List.of(programme("AMC (HD).hu", 1, 2, "Show Alpha"))));
+        guide().refresh();
+
+        assertThat(DB.getCollection("sourceChannels").countDocuments()).isEqualTo(2);
+        assertThat(guideStore.normalized(A.id()).orElseThrow().channels()).extracting(SourceChannel::id)
+                .containsExactlyInAnyOrder("AMC (HD).hu", "Duck TV.hu");
+    }
+
+    @Test
+    void theSeedAndTheReseedAgreeAboutWhatASourceDeclares() {
+        // The acceptance criterion, end to end over the real store: a source declares three channels and
+        // publishes programmes for one of them. The seed writes the registry from the declarations; the
+        // re-seed rebuilds it from what the store kept. Both must name the same three ids, and a re-seed over
+        // a registry that is already right must propose no change (HOU-39).
+        documents.put("a", new SourceEpg(new SourceId("a"),
+                List.of(new SourceChannel("AMC (HD).hu", "AMC", null),
+                        new SourceChannel("Duck TV.hu", "Duck TV", null),
+                        new SourceChannel("mtveuro.hu", "MTV Europe", null)),
+                List.of(programme("AMC (HD).hu", 1, 2, "Show Alpha"))));
+        GuideSettings settings = new GuideSettings(List.of(A), Optional.empty(), Duration.ofDays(7));
+
+        refreshGuide(settings).refresh();
+        assertThat(guideStore.registry()).extracting(channel -> channel.id().value())
+                .containsExactly("AMC (HD).hu", "Duck TV.hu", "mtveuro.hu");
+
+        ReseedRegistry reseed = new ReseedRegistry(settings, guideStore, location -> List.of());
+        ReseedRegistry.Preview preview = reseed.preview();
+
+        assertThat(preview.added()).isEmpty();
+        assertThat(preview.removed()).isEmpty();
+        assertThat(preview.changesAnything()).isFalse();
+        assertThat(preview.proposed()).extracting(channel -> channel.id().value())
+                .containsExactly("AMC (HD).hu", "Duck TV.hu", "mtveuro.hu");
+    }
+
+    @Test
+    void theSeedAndTheReseedAgreeWhenTheSourcePublishesNothingAtAll() {
+        // The edge that made the bug visible on the production feed: every channel of this source is
+        // programme-less, so a re-seed that rebuilt its channels from programme rows would propose an empty
+        // registry and withdraw every id.
+        documents.put("a", new SourceEpg(new SourceId("a"),
+                List.of(new SourceChannel("Hustler.TV.hu", "Hustler", null),
+                        new SourceChannel("mtveuro.hu", "MTV Europe", null)), List.of()));
+        GuideSettings settings = new GuideSettings(List.of(A), Optional.empty(), Duration.ofDays(7));
+
+        refreshGuide(settings).refresh();
+        assertThat(guideStore.registry()).extracting(channel -> channel.id().value())
+                .containsExactly("Hustler.TV.hu", "mtveuro.hu");
+
+        ReseedRegistry.Preview preview = new ReseedRegistry(settings, guideStore, location -> List.of()).preview();
+
+        assertThat(preview.removed()).isEmpty();
+        assertThat(preview.changesAnything()).isFalse();
+    }
+
+    private RefreshGuide refreshGuide(GuideSettings settings) {
+        return new RefreshGuide(settings, this::read, location -> List.of(), matchStore, guideStore);
+    }
+
     private RefreshGuide guide() {
         GuideSettings settings = new GuideSettings(List.of(A), Optional.of("fixture:playlist.m3u"), Duration.ofDays(7));
         return new RefreshGuide(settings, this::read, location -> List.of(
@@ -235,7 +366,7 @@ class MongoPersistenceIntegrationTest {
             channels.putIfAbsent(programme.sourceChannelId(),
                     new SourceChannel(programme.sourceChannelId(), programme.sourceChannelId(), null));
         }
-        return new SourceEpg(new com.anti.houseepg.domain.guide.model.SourceId(sourceId),
+        return new SourceEpg(new SourceId(sourceId),
                 List.copyOf(channels.values()), List.of(programmes));
     }
 

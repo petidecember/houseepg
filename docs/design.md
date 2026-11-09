@@ -498,6 +498,21 @@ Indexes: `programmes(canonicalChannelId, start)`, `programmes(sourceId, canonica
 `programmes(stop)` for retention, `mergedProgrammes(canonicalChannelId, start)`,
 `sourceChannels(sourceId, sourceChannelId)` unique, `canonicalChannels(id)` unique.
 
+**Declarations are stored, not inferred.** The channels a source *declares* live in `sourceChannels`, one row
+per `(sourceId, sourceChannelId)`, because a declaration is not derivable from the programmes: a provider
+routinely publishes a channel it has no programme for — the production feed declares four such ids, and after
+HOU-32 the registry holds all of them. Rebuilding the declaration list from programme rows would drop exactly
+those channels, so the seed (which reads the declaration list) and the re-seed (which reads the store) would
+answer the same question differently and a re-seed would quietly withdraw those four ids — the ADR-0002 hazard
+of a moving emitted id. One truth, read by both paths.
+
+Declarations are replaced with the source's programmes on every refresh, **deduplicated by id keeping the
+first**, and only `programmes` is pruned by retention: an id the source still declares stays declared after its
+last programme ages out. A database written before `sourceChannels` existed has no rows in it, so the read
+falls back to the programme rows — the old behaviour — until the next refresh writes the declarations it
+fetched. That backfill is a repair, not a migration step: nothing is deleted, and the registry an older build
+seeded is left exactly as it was.
+
 **Retention:** programmes that ended more than ~7 days ago are pruned, and they are dropped before the
 merge, so the materialized guide never carries them either. One raw snapshot per source is kept (the
 last good one); a failed fetch never writes one.
@@ -579,6 +594,13 @@ source has credentials, never the credentials themselves.
   list compiles into the same matcher and a blank one fails the boot), and end to end
   (`RefreshGuideTest`, the registry holds only the configured group's ids, and a whitelist that matches
   nothing keeps the stored registry instead of emptying it).
+- The **stored declarations** are proved against the real store
+  (`MongoPersistenceIntegrationTest`): a declared channel with no programmes survives a save/load round trip,
+  a source that publishes nothing at all is still round-tripped, the index is the documented unique pair, a
+  database written before the collection existed is backfilled by the next refresh, and — the point of the
+  card — the **seed and the re-seed propose the same registry** over one document, including one whose
+  channels have no programmes at all. The in-memory test double cannot carry this proof: it already stored the
+  whole document, so it round-tripped programme-less channels before the fix and would pass either way.
 - Verification gate before any completion claim: `./gradlew test`, `./gradlew integrationTest`,
   and for UI changes `cd frontend && npx tsc --noEmit && npm run build` with `frontend/dist/*`
   copied into `src/main/resources/static/`.
